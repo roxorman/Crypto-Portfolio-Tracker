@@ -1,0 +1,15 @@
+Total Portfolio Balance: $2600
+    Solana: 1000
+        Popcat: 400
+        Fartcoin: 300
+        Solana: 200
+        Tate: 100
+    Ethereum: 800
+        Ethereum: 500
+        USDT: 200
+        PEPE: 1000
+    Linea: 400
+        USDC: 400
+    Base: 400
+        USDT: 200
+        Brett: 200

@@ -1,0 +1,97 @@
+<b>📖 Help Menu</b>
+
+<b>🔹 Portfolios</b>
+• <code>/portfolio_create &lt;Name&gt;</code>
+Create a new portfolio.
+
+• <code>/portfolio_list</code>
+List all your portfolios.
+
+• <code>/portfolio_delete &lt;Name&gt;</code>
+Delete a portfolio.
+
+• <code>/portfolio_rename &lt;OldName&gt; &lt;NewName&gt;</code>
+Rename a portfolio.
+
+• <code>/portfolio_add_wallet &lt;Portfolio&gt; &lt;Address&gt; [Chain] [Label]</code>
+Add a wallet (and optional chain/label) to a portfolio.
+
+• <code>/portfolio_remove_wallet &lt;Portfolio&gt; &lt;Address|Label&gt; &lt;Chain&gt;</code>
+Remove a wallet from a portfolio.
+
+<b>🔹 Wallets</b>
+• <code>/wallet_list [Portfolio]</code>
+List your tracked wallets (optionally within a portfolio).
+
+• <code>/wallet_set_label &lt;Address|OldLabel&gt; &lt;NewLabel&gt;</code>
+Update a wallet’s label.
+
+<b>🔹 Analytics</b>
+• <code>/summary [Portfolio]</code>
+View total value summary for your portfolio(s).
+
+• <code>/portfolio_holdings [Portfolio|Wallet] [MinUSD]</code>
+Show token holdings above a USD threshold.
+
+• <code>/stats [Portfolio|Wallet] [Period]</code>
+Performance statistics (e.g. 7d, 30d).
+
+• <code>/chart [Portfolio|Wallet] &lt;Type&gt;</code> <i>(Premium)</i>
+Generate a chart (pie, line, etc.).
+
+<b>🔹 Alerts</b>
+• <code>/alert_price_create &lt;Token&gt; &lt;Chain&gt; &lt;above|below&gt; &lt;Price&gt;</code>
+Add a price alert.
+
+• <code>/alert_price_list</code>
+List your active price alerts.
+
+• <code>/alert_price_remove &lt;ID&gt;</code>
+Remove a price alert.
+
+• <code>/alert_portfolio_create &lt;Portfolio&gt; &lt;above|below&gt; &lt;Value&gt;</code> <i>(Premium)</i>
+Alert on portfolio total value.
+
+• <code>/alert_portfolio_list</code>
+List portfolio value alerts.
+
+• <code>/alert_portfolio_remove &lt;ID&gt;</code>
+Remove a portfolio alert.
+
+• <code>/alert_tx_create &lt;Wallet&gt; [MinUSD]</code> <i>(Premium)</i>
+Alert on your wallet’s transactions.
+
+• <code>/alert_tx_list</code>
+List your transaction alerts.
+
+• <code>/alert_tx_remove &lt;Wallet&gt;</code>
+Remove a transaction alert.
+
+<b>🔹 Trackers</b>
+• <code>/tracker_add &lt;Address&gt; &lt;Chain&gt; [Label]</code>
+Track an external wallet.
+
+• <code>/tracker_list</code>
+List external wallets you’re tracking.
+
+• <code>/tracker_view &lt;Address|Label&gt; [Limit]</code>
+Show recent transactions.
+
+• <code>/tracker_set_alert &lt;Address|Label&gt; &lt;on|off&gt;</code> <i>(Premium)</i>
+Toggle transaction alerts.
+
+• <code>/tracker_remove &lt;Address|Label&gt;</code>
+Stop tracking an external wallet.
+
+<b>🔹 Settings & Info</b>
+• <code>/settings_view</code>
+Show your current settings.
+
+• <code>/settings_set_currency &lt;Currency&gt;</code>
+Set your display currency (e.g., USD).
+
+• <code>/settings_set_min_holding &lt;Value&gt;</code>
+Default minimum USD for holdings.
+
+• <code>/premium</code>
+Learn about Premium features & subscription.

@@ -1,0 +1,12 @@
+
+-- For alembic variable env loading
+Ensure Environment Variables are Loaded (Crucial):
+Alembic itself doesn't automatically load .env files. Your application code often does (using load_dotenv() from python-dotenv), but the alembic command-line tool won't unless you tell it to or run it in an environment where they are pre-loaded.
+Simplest Method: Activate your virtual environment. If you have python-dotenv installed, running Python scripts might load it, but for the alembic command directly, you might need to ensure it's loaded. Often, just having the .env file present might work if other tools in your stack load it, but let's be explicit if needed.
+Alternative (Manual Loading in Terminal - PowerShell): If the above doesn't work, you could manually load it just before running alembic (though less convenient):
+# In PowerShell (run EACH time before alembic commands in a new terminal)
+$env:DATABASE_URL=(Get-Content .env | Where-Object { $_ -match '^DATABASE_URL=' }) -replace '^DATABASE_URL=', ''
+alembic revision --autogenerate -m "Initial database schema"
+Use code with caution.
+Powershell
+Try without manual loading first. The ${DATABASE_URL} syntax in alembic.ini should pick up environment variables set in the shell. Ensure your .env file exists and alembic.ini uses sqlalchemy.url = ${DATABASE_URL}.
