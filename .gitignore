@@ -1,0 +1,45 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.env/
+venv/
+ENV/
+*.env
+
+# VSCode settings
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Token / API keys if in a file
+*.env
+
+# Misc
+*.sqlite3
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Coverage reports
+.coverage*
+htmlcov/
+
+# Test artifacts
+.pytest_cache/
+
+# IDE specific files
+.idea/
+
+# Temporary files
+*.tmp
+*.bak
