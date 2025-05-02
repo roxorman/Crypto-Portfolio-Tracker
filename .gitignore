@@ -1,16 +1,22 @@
-# Byte-compiled / cache
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-*.pyo
+*$py.class
 
 # Virtual environments
-.env/
 venv/
-ENV/
-*.env
+env/
+.venv/
+.env/
 
-# VSCode settings
+# Environment variables / secrets
+.env
+
+# IDE/editor settings
 .vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
 
 # OS files
 .DS_Store
@@ -19,27 +25,19 @@ Thumbs.db
 # Logs
 *.log
 
-# Token / API keys if in a file
-*.env
+# Test / coverage reports
+.coverage
+htmlcov/
+.tox/
+.pytest_cache/
+nosetests.xml
+coverage.xml
 
-# Misc
-*.sqlite3
-
-# Build artifacts
+# Distribution / packaging
 build/
 dist/
 *.egg-info/
+.eggs/
 
-# Coverage reports
-.coverage*
-htmlcov/
-
-# Test artifacts
-.pytest_cache/
-
-# IDE specific files
-.idea/
-
-# Temporary files
-*.tmp
-*.bak
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/

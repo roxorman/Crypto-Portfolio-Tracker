@@ -143,7 +143,7 @@ class PortfolioFetcher:
     # Removed get_wallet_holdings, get_portfolio_holdings, format_holdings_message, generate_portfolio_chart
     # These will be handled by a separate analysis/presentation class.
 
-# test this function
+"""# test this function
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO) # Add basic logging for test
     fetcher = PortfolioFetcher()
@@ -183,3 +183,4 @@ if __name__ == "__main__":
         print(f"Threshold: {portfolio_data_high['min_value_threshold']}")
     else:
         print(f"Failed to fetch portfolio data (threshold ${higher_threshold}).")
+"""
