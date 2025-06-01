@@ -38,8 +38,6 @@ CREATE TABLE wallets (
     wallet_id SERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     address VARCHAR(255) NOT NULL,                  -- The unique wallet address string
-    -- **NEW:** Type helps distinguish address formats and potential chain groups
-    wallet_type VARCHAR(20) NOT NULL CHECK (wallet_type IN ('evm', 'solana', 'other')), -- Add more types as needed
     label VARCHAR(100) NULL,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     -- **CHANGED:** User adds the address identity once.
@@ -53,17 +51,13 @@ CREATE INDEX idx_wallets_address ON wallets(address);
 CREATE TABLE portfolio_wallets (
     portfolio_id INT NOT NULL REFERENCES portfolios(portfolio_id) ON DELETE CASCADE,
     wallet_id INT NOT NULL REFERENCES wallets(wallet_id) ON DELETE CASCADE,
-    -- **NEW:** Specify the chain for this wallet within this portfolio context
-    chain VARCHAR(50) NOT NULL,
     added_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    -- **CHANGED:** Primary key now includes chain
-    PRIMARY KEY (portfolio_id, wallet_id, chain)
+    -- **CHANGED:** Primary key now only portfolio_id and wallet_id
+    PRIMARY KEY (portfolio_id, wallet_id)
 );
 -- Indexes
 CREATE INDEX idx_portfolio_wallets_portfolio_id ON portfolio_wallets(portfolio_id);
 CREATE INDEX idx_portfolio_wallets_wallet_id ON portfolio_wallets(wallet_id);
--- Index to find specific chains within a portfolio/wallet combo
-CREATE INDEX idx_portfolio_wallets_wallet_chain ON portfolio_wallets(wallet_id, chain);
 
 
 -- 5. Tracked Wallets Table (External Wallets - Represents Address Identity)
@@ -71,8 +65,6 @@ CREATE TABLE tracked_wallets (
     tracked_wallet_id SERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     address VARCHAR(255) NOT NULL,
-    -- **NEW:** Type helps distinguish address formats
-    wallet_type VARCHAR(20) NOT NULL CHECK (wallet_type IN ('evm', 'solana', 'other')),
     label VARCHAR(100) NULL,
     alerts_enabled BOOLEAN NOT NULL DEFAULT FALSE, -- For tx alerts
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),

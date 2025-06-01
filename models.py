@@ -60,7 +60,7 @@ class Portfolio(Base):
     # )
     # --- KEEP the relationship TO the association object ---
     wallet_associations = relationship("PortfolioWalletAssociation", back_populates="portfolio", cascade="all, delete-orphan")
-    alerts = relationship("Alert", back_populates="portfolio", cascade="all, delete-orphan")
+    # alerts = relationship("Alert", back_populates="portfolio", cascade="all, delete-orphan") # Removed: Alert no longer directly links to Portfolio via FK
     portfolio_snapshots = relationship("PortfolioSnapshot", back_populates="portfolio", cascade="all, delete-orphan", order_by="PortfolioSnapshot.timestamp")
 
     __table_args__ = (
@@ -75,7 +75,6 @@ class Wallet(Base):
     wallet_id = Column(Integer, primary_key=True)
     user_id = Column(BigInteger, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False, index=True)
     address = Column(String(255), nullable=False, index=True)
-    wallet_type = Column(String(20), nullable=False) # e.g., 'evm', 'solana', 'other'
     label = Column(String(100), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
 
@@ -89,11 +88,10 @@ class Wallet(Base):
     # )
     # --- KEEP the relationship TO the association object ---
     portfolio_associations = relationship("PortfolioWalletAssociation", back_populates="wallet", cascade="all, delete-orphan")
-    alerts = relationship("Alert", back_populates="wallet", cascade="all, delete-orphan")
+    # alerts = relationship("Alert", back_populates="wallet", cascade="all, delete-orphan") # Removed: Alert no longer directly links to Wallet via FK
     portfolio_snapshots = relationship("PortfolioSnapshot", back_populates="wallet", cascade="all, delete-orphan", order_by="PortfolioSnapshot.timestamp")
 
     __table_args__ = (
-        CheckConstraint(wallet_type.in_(['evm', 'solana', 'other']), name='check_wallet_type'),
         UniqueConstraint('user_id', 'address', name='uq_user_wallet_address'),
         Index('idx_wallets_user_id', 'user_id'), # Corrected Index definition syntax
         Index('idx_wallets_address', 'address'), # Corrected Index definition syntax
@@ -110,8 +108,6 @@ class PortfolioWalletAssociation(Base):
     # Foreign keys remain, but are not part of the primary key anymore unless explicitly defined
     portfolio_id = Column(Integer, ForeignKey('portfolios.portfolio_id', ondelete='CASCADE'), nullable=False)
     wallet_id = Column(Integer, ForeignKey('wallets.wallet_id', ondelete='CASCADE'), nullable=False)
-    # Chain is now optional
-    chain = Column(String(50), nullable=True) # No longer primary key, allows NULL
     added_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
 
     # Relationships to easily access Portfolio and Wallet objects *from* the association object
@@ -120,13 +116,10 @@ class PortfolioWalletAssociation(Base):
 
     # Define indexes and constraints
     __table_args__ = (
-        # Ensure a wallet can only be added once per portfolio, either generically (NULL chain)
-        # or for a specific chain.
-        UniqueConstraint('portfolio_id', 'wallet_id', 'chain', name='uq_portfolio_wallet_chain'),
+        # Ensure a wallet can only be added once per portfolio.
+        UniqueConstraint('portfolio_id', 'wallet_id', name='uq_portfolio_wallet'),
         Index('idx_portfolio_wallets_portfolio_id', 'portfolio_id'),
         Index('idx_portfolio_wallets_wallet_id', 'wallet_id'),
-        Index('idx_portfolio_wallets_chain', 'chain'), # Index on chain might be useful
-        Index('idx_portfolio_wallets_wallet_chain', 'wallet_id', 'chain'),
     )
 
 
@@ -137,17 +130,15 @@ class TrackedWallet(Base):
     tracked_wallet_id = Column(Integer, primary_key=True)
     user_id = Column(BigInteger, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False, index=True)
     address = Column(String(255), nullable=False, index=True)
-    wallet_type = Column(String(20), nullable=False) # e.g., 'evm', 'solana', 'other'
     label = Column(String(100), nullable=True)
     alerts_enabled = Column(Boolean, nullable=False, default=False) # For tx alerts
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
 
     # Relationships
     user = relationship("User", back_populates="tracked_wallets")
-    alerts = relationship("Alert", back_populates="tracked_wallet", cascade="all, delete-orphan")
+    # alerts = relationship("Alert", back_populates="tracked_wallet", cascade="all, delete-orphan") # Removed: Alert no longer directly links to TrackedWallet via FK
 
     __table_args__ = (
-        CheckConstraint(wallet_type.in_(['evm', 'solana', 'other']), name='check_tracked_wallet_type'),
         UniqueConstraint('user_id', 'address', name='uq_user_tracked_wallet_address'),
         Index('idx_tracked_wallets_user_id', 'user_id'), # Corrected Index definition syntax
         Index('idx_tracked_wallets_address', 'address'), # Corrected Index definition syntax
@@ -159,35 +150,41 @@ class Alert(Base):
 
     alert_id = Column(Integer, primary_key=True)
     user_id = Column(BigInteger, ForeignKey('users.user_id', ondelete='CASCADE'), nullable=False, index=True)
-    alert_type = Column(String(50), nullable=False)
-    conditions = Column(JSONB, nullable=False) # Store alert conditions as JSONB
-    is_active = Column(Boolean, nullable=False, default=True)
+    alert_type = Column(String(50), nullable=False, index=True) # Added index
+    conditions = Column(JSONB, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True, index=True) # Added index
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
     last_triggered_at = Column(TIMESTAMP(timezone=True), nullable=True)
     trigger_count = Column(Integer, nullable=False, default=0)
 
-    # Nullable Foreign Keys
-    portfolio_id = Column(Integer, ForeignKey('portfolios.portfolio_id', ondelete='CASCADE'), nullable=True, index=True)
-    wallet_id = Column(Integer, ForeignKey('wallets.wallet_id', ondelete='CASCADE'), nullable=True, index=True) # Refers to user's wallet identity
-    tracked_wallet_id = Column(Integer, ForeignKey('tracked_wallets.tracked_wallet_id', ondelete='CASCADE'), nullable=True, index=True) # Refers to tracked wallet identity
+    # --- Fields for Token Price Alerts (CoinMarketCap Integration) ---
+    cmc_id = Column(Integer, nullable=False, index=True) # CoinMarketCap ID for the token
+    # For displaying to the user, e.g., "Bitcoin (BTC)". Sourced primarily from CMC.
+    token_display_name = Column(String(255), nullable=False) # Made non-nullable as it's essential
+    # Optional: Store the price that triggered the alert for notification context.
+    last_triggered_price = Column(Float, nullable=True)
+    # token_mobula_id is now removed as we are focusing on CMC.
+    # --- End Fields for Token Price Alerts ---
 
     # Relationships
     user = relationship("User", back_populates="alerts")
-    portfolio = relationship("Portfolio", back_populates="alerts")
-    wallet = relationship("Wallet", back_populates="alerts")
-    tracked_wallet = relationship("TrackedWallet", back_populates="alerts")
 
     __table_args__ = (
-        CheckConstraint(alert_type.in_(['price', 'portfolio_value', 'wallet_tx', 'tracked_wallet_tx']), name='check_alert_type'),
-        # The complex CHECK constraint 'check_alert_fk' from SQL is harder to represent directly
-        # in SQLAlchemy's declarative layer. It's often handled in application logic or
-        # potentially with a database-level constraint added separately via migrations.
-        Index('idx_alerts_user_id', 'user_id'), # Added explicit index definition
-        Index('idx_alerts_portfolio_id', 'portfolio_id'), # Added explicit index definition
-        Index('idx_alerts_wallet_id', 'wallet_id'), # Added explicit index definition
-        Index('idx_alerts_tracked_wallet_id', 'tracked_wallet_id'), # Added explicit index definition
-        Index('idx_alerts_active_type_partial', 'alert_type', postgresql_where=(is_active == True)), # Corrected syntax
-        Index('idx_alerts_conditions_gin', 'conditions', postgresql_using='gin', postgresql_ops={'conditions': 'jsonb_path_ops'}),
+        CheckConstraint(
+            alert_type.in_(['token_price']), 
+            name='check_alert_type'
+        ),
+        # Ensures that for 'token_price' alerts (which is the only type now),
+        # cmc_id and token_display_name are provided.
+        CheckConstraint(
+            "cmc_id IS NOT NULL AND token_display_name IS NOT NULL", 
+            name='check_token_price_alert_fields'
+        ),
+        Index('idx_alerts_user_id_active_type', 'user_id', 'is_active', 'alert_type'),
+        Index('idx_alerts_active_cmc_id', 'is_active', 'cmc_id', # Renamed and points to cmc_id
+              postgresql_where=(alert_type == 'token_price')),
+        Index('idx_alerts_cmc_id', 'cmc_id'), # Explicit index on cmc_id
+        Index('idx_alerts_conditions_gin', 'conditions', postgresql_using='gin'),
     )
 
 class PortfolioSnapshot(Base):

@@ -12,6 +12,8 @@ class Config:
         self.ALCHEMY_API_KEY = os.getenv('ALCHEMY_API_KEY')
         self.MORALIS_API_KEY = os.getenv('MORALIS_API_KEY')
         self.MOBULA_API_KEY = os.getenv('MOBULA_API_KEY')
+        self.COINMARKETCAP_API_KEY = os.getenv('COINMARKETCAP_API_KEY') # Added CoinMarketCap API Key
+        self.ZERION_API_KEY = os.getenv('ZERION_API_KEY')
         
         # Database Configuration
         self.DATABASE_URL = os.getenv('DATABASE_URL', '').strip()
@@ -35,7 +37,7 @@ class Config:
         
     @staticmethod
     def get_api_key() -> str:
-        """Get the Alchemy API key from environment variables."""
+        """Get the  API key from environment variables."""
         api_key = os.getenv('ALCHEMY_API_KEY')
         if not api_key:
             raise ValueError("ALCHEMY_API_KEY not found in environment variables")

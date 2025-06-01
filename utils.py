@@ -1,7 +1,9 @@
-from typing import Dict, List, Union
+# utils.py
+from typing import Dict, List, Union, Optional, Tuple, Any # Added Optional, Tuple, Any
 from decimal import Decimal
 from datetime import datetime, timedelta
 import json
+from config import Config
 
 def normalize_chain_name(chain: str) -> str:
     """
@@ -9,7 +11,6 @@ def normalize_chain_name(chain: str) -> str:
     Maps common short names to full names.
     """
     chain = chain.lower().strip()
-    # Add more mappings as needed
     chain_mapping = {
         'eth': 'ethereum',
         'arb': 'arbitrum',
@@ -19,9 +20,26 @@ def normalize_chain_name(chain: str) -> str:
         # Add more here...
         # 'sol': 'solana' # If adding non-EVM
     }
-    return chain_mapping.get(chain, chain) # Return mapped name or original if no map
+    return chain_mapping.get(chain, chain)
 
-# Use the 0x1234...5678 version
+def parse_view_args(args: List[str]) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Parses arguments for view-like commands to extract an identifier
+    and an optional chain filter (e.g., "chain:base").
+    """
+    if not args:
+        return None, None
+    identifier = args[0]
+    chain_filter = None
+    for arg in args[1:]:
+        if arg.lower().startswith("chain:"):
+            chain_part = arg.split(":", 1)[1]
+            if chain_part:
+                chain_filter = normalize_chain_name(chain_part)
+            break
+    return identifier, chain_filter
+
+# ... (rest of your existing utils.py content: format_address, format_currency, etc.)
 def format_address(address: str, start_len: int = 6, end_len: int = 4) -> str:
     """
     Format Ethereum address for display (e.g., 0x1234...5678).
@@ -169,3 +187,128 @@ def chunk_list(lst: List, chunk_size: int) -> List[List]:
     if not isinstance(lst, list) or not isinstance(chunk_size, int) or chunk_size <= 0:
         return [lst] # Return original list in a list, or handle error as needed
     return [lst[i:i + chunk_size] for i in range(0, len(lst), chunk_size)]
+
+# Import PortfolioFetcher for type hinting, ensure no circular dependency issues.
+# If api_fetcher imports utils, this might need careful structuring or moving the function.
+# For now, assuming utils.py can import from api_fetcher.py without circularity.
+# If circularity is an issue, this function might be better placed in a different module
+# or api_fetcher_instance passed as 'Any'.
+from api_fetcher import PortfolioFetcher # Added for type hint
+import logging # Add logging for utils if not already present
+
+logger = logging.getLogger(__name__) # Add logger for utils
+
+async def get_token_info_from_contract_address(api_fetcher_instance: PortfolioFetcher, contract_address: str) -> Optional[Dict[str, Any]]:
+    """
+    Fetches token information using a contract address from CMC.
+
+    Args:
+        api_fetcher_instance: An instance of the PortfolioFetcher class.
+        contract_address: The contract address of the token.
+
+    Returns:
+        A dictionary containing the token's metadata (id, name, symbol, slug, etc.)
+        if found and contains a slug, otherwise None.
+    """
+    if not contract_address:
+        logger.debug("get_token_info_from_contract_address: No contract address provided.")
+        return None
+
+    token_info = await api_fetcher_instance.get_token_info_by_contract_address(contract_address)
+    
+    if token_info and isinstance(token_info, dict) and 'slug' in token_info and isinstance(token_info['slug'], str):
+        logger.debug(f"Successfully retrieved token_info with slug for address {contract_address}.")
+        return token_info # Return the whole dictionary
+    else:
+        if token_info:
+            logger.warning(f"Retrieved token_info for address {contract_address} but slug is missing or invalid: {token_info}")
+        else:
+            logger.debug(f"No token_info retrieved by api_fetcher for address {contract_address}.")
+        return None
+
+def get_cmc_slug(address: str) -> Optional[str]:
+    """
+    Get CoinMarketCap slug from address and chain.
+    Returns None if not found or invalid input.
+    """
+    url = "https://pro-api.coinmarketcap.com/v2/cryptocurrency/info"
+    params = {
+        'address': address,
+    }
+    headers = {
+        'Accepts': 'application/json',
+        'X-CMC_PRO_API_KEY': Config.COINMARKETCAP_API_KEY,  # Use the API key from config
+    }
+
+def format_price_dynamically(price: float, significant_digits: int = 4) -> str:
+    """
+    Formats a price to a string with a specified number of significant digits.
+    Handles very small numbers by using scientific notation if necessary for precision,
+    or general formatting for typical prices.
+    Aims to avoid "$0.0000" for small, non-zero prices.
+    """
+    if price == 0:
+        return "0.00" # Or simply "0"
+    
+    # Determine the number of decimal places needed to show the first significant digit
+    # For example, if price is 0.0001234, and significant_digits is 4, we want to show 0.0001234
+    # If price is 0.0000001234, we want 0.0000001234
+    # If price is 12.3456, we want 12.35 (if significant_digits implies 2 decimal places for numbers > 1)
+    # If price is 123.456, we want 123.5
+    # If price is 1234.56, we want 1235
+
+    if abs(price) < 1e-4 and abs(price) > 0: # For very small numbers, show more precision or use 'g' format
+        # Try to format to show up to 'significant_digits' *after* leading zeros
+        # This is tricky with standard formatters directly.
+        # A simple approach for very small numbers:
+        s = f"{price:.{significant_digits + int(abs(math.log10(abs(price))))}f}" 
+        # Trim trailing zeros if it results in them, but ensure it doesn't become "0.0000" if it's not zero
+        s_trimmed = s.rstrip('0')
+        if s_trimmed.endswith('.'):
+            s_trimmed += '0' # Avoid "0."
+        # If it becomes "0.0" or "0", but original price was not 0, use a more general format
+        if float(s_trimmed) == 0 and price != 0:
+             return f"{price:.{significant_digits}g}" # Use general format for very small numbers
+        return s_trimmed
+    
+    # For numbers >= 0.0001 or < -0.0001
+    # Use a method to determine decimal places based on magnitude and significant digits
+    if abs(price) >= 1:
+        # For numbers >= 1, significant digits mostly affect decimals
+        # Example: 12.3456 with 4 sig digits -> 12.35 (2 decimals)
+        # Example: 1.23456 with 4 sig digits -> 1.235 (3 decimals)
+        # Example: 1234.56 with 4 sig digits -> 1235 (0 decimals)
+        # Example: 12345.6 with 4 sig digits -> 12350 (approx, or use 'g')
+        
+        # Let's try a simpler approach: format to a reasonable number of decimals,
+        # then refine if it's too many or too few for "significance".
+        # This is a common heuristic:
+        if abs(price) >= 1000:
+            decimals = 0
+        elif abs(price) >= 100:
+            decimals = 1
+        elif abs(price) >= 1:
+            decimals = 2
+        elif abs(price) >= 0.01:
+            decimals = 4
+        else: # < 0.01 but not extremely small (handled above)
+            decimals = 6 # Show a few more for smaller numbers
+            
+        # Ensure we don't show excessive precision if the number is simple
+        formatted_price = f"{price:,.{decimals}f}"
+        # If after formatting, it's like "12.00" and we only needed "12", this is fine.
+        # The main goal is to avoid "$0.0000" for non-zero small values.
+        # Let's refine the number of decimals to show *at least* `significant_digits` if possible,
+        # without being excessive for large numbers.
+
+        # A more direct way for significant figures:
+        # This format specifier '{value:.{precision}g}' attempts to show 'precision' significant figures.
+        return f"{price:.{significant_digits}g}"
+
+    # Fallback for numbers between 1e-4 and 0.01 (or numbers not caught above)
+    # This ensures we show enough decimal places for these.
+    # The '.{significant_digits}g' should handle this reasonably.
+    return f"{price:.{significant_digits}g}"
+
+# Need to import math for log10
+import math

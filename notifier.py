@@ -60,6 +60,7 @@ class Notifier:
             # Assuming help_text.txt might contain formatting, try sending as HTML
             # If help_text.txt causes errors, change parse_mode to None here.
             await self.send_message(chat_id=chat_id, text=help_text, parse_mode='HTML')
+
         except Exception as e:
             logger.error(f"Error sending help message: {e}")
             # Fallback to plain text if Markdown fails? Or just log the error.
@@ -87,15 +88,18 @@ class Notifier:
             logger.error(f"Error sending wallet summary: {e}")
             return False
 
-    async def send_alert_notification(self, chat_id: int, message: str) -> bool:
-        """Send alert notification message (plain text)."""
+    async def send_alert_notification(self, chat_id: int, message: str, parse_mode: str = "MarkdownV2") -> bool:
+        """
+        Send alert notification message.
+        Defaults to MarkdownV2 for richer formatting.
+        The caller is responsible for crafting the full message content.
+        """
         try:
-            # Add alert emoji
-            formatted_message = f"🚨 ALERT 🚨\n\n{message}"
-            # Send alerts as plain text unless specific formatting is needed
-            return await self.send_message(chat_id, formatted_message, parse_mode=None)
+            # The message is now expected to be fully formatted by the caller.
+            # The "🚨 ALERT 🚨" prefix or similar should be part of the 'message' argument if desired.
+            return await self.send_message(chat_id, message, parse_mode=parse_mode)
         except Exception as e:
-            logger.error(f"Error sending alert notification: {e}")
+            logger.error(f"Error sending alert notification (parse_mode={parse_mode}): {e}")
             return False
 
     async def send_chart(self, chat_id: int, chart_data: io.BytesIO,

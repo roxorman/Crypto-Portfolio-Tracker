@@ -1,97 +1,121 @@
 <b>📖 Help Menu</b>
 
-<b>🔹 Portfolios</b>
-• <code>/portfolio_create &lt;Name&gt;</code>
-Create a new portfolio.
+Welcome! Add your wallets with <code>/add</code>, then view holdings with <code>/view</code>. Portfolios are optional groups.
 
-• <code>/portfolio_list</code>
-List all your portfolios.
+<b>🔹 Core Commands</b>
+• <code>/start</code>
+Initialize the bot and register.
 
-• <code>/portfolio_delete &lt;Name&gt;</code>
-Delete a portfolio.
+• <code>/help</code>
+Show this help message.
 
-• <code>/portfolio_rename &lt;OldName&gt; &lt;NewName&gt;</code>
-Rename a portfolio.
+<b>🔹 Wallet Management</b>
+• <code>/add &lt;Address&gt; [Label...]</code>
+Add a wallet to track. Labels make identifying wallets easier.
+<i>Note: Wallet Address must be unique. Label must also be unique if provided.</i>
+<i>Example EVM:</i> <code>/add 0x123...abc Main ETH Wallet</code>
+<i>Example Solana:</i> <code>/add 6EXX...QLMG Solana Stash</code>
 
-• <code>/portfolio_add_wallet &lt;Portfolio&gt; &lt;Address&gt; [Chain] [Label]</code>
-Add a wallet (and optional chain/label) to a portfolio.
+• <code>/remove &lt;Address | Label&gt;</code>
+Stop tracking a wallet and remove it completely.
+<i>Example:</i> <code>/remove Main ETH Wallet</code>
+<i>Example:</i> <code>/remove 0x123...abc</code>
 
-• <code>/portfolio_remove_wallet &lt;Portfolio&gt; &lt;Address|Label&gt; &lt;Chain&gt;</code>
-Remove a wallet from a portfolio.
+• <code>/label &lt;Address&gt; &lt;New Label...&gt;</code>
+Change the label of an already tracked wallet. The new label must be unique.
+<i>Example:</i> <code>/label 0x123...abc Best Wallet Ever</code>
 
-<b>🔹 Wallets</b>
-• <code>/wallet_list [Portfolio]</code>
-List your tracked wallets (optionally within a portfolio).
+• <code>/list</code> or <code>/wallets</code>
+Show all the wallets you are currently tracking.
 
-• <code>/wallet_set_label &lt;Address|OldLabel&gt; &lt;NewLabel&gt;</code>
-Update a wallet’s label.
+<b>🔹 Viewing Holdings</b>
+• <code>/view &lt;Address | Label | PortfolioName&gt; [chain:&lt;ChainName&gt;]</code>
+View assets for a specific wallet, labeled wallet, or portfolio.
+<i>View Wallet:</i> <code>/view 0x123...abc</code>
+<i>View Labeled Wallet:</i> <code>/view Solana Stash</code>
+<i>View Portfolio:</i> <code>/view My DeFi Bets</code>
+<i>Filter EVM Wallet by Chain:</i> <code>/view 0x123...abc chain:base</code>
+<i>(Chain filter only applies when viewing a single EVM wallet).</i>
 
-<b>🔹 Analytics</b>
-• <code>/summary [Portfolio]</code>
-View total value summary for your portfolio(s).
+• <code>/holdings</code>
+Alias for <code>/view</code>.
 
-• <code>/portfolio_holdings [Portfolio|Wallet] [MinUSD]</code>
-Show token holdings above a USD threshold.
+<b>🔹 Portfolio Management (Optional Grouping)</b>
+• <code>/pcreate &lt;Name&gt; [Description...]</code>
+Create a new, empty portfolio group.
+<i>Example:</i> <code>/pcreate My Long Term Holds</code>
 
-• <code>/stats [Portfolio|Wallet] [Period]</code>
+• <code>/plist</code>
+List your portfolios and the wallets associated with them.
+
+• <code>/pdelete &lt;Name&gt;</code>
+Delete a portfolio group (the wallets remain tracked).
+
+• <code>/prename &lt;OldName&gt; &lt;NewName&gt;</code>
+Rename a portfolio group.
+
+• <code>/padd &lt;PortfolioName&gt; &lt;Address|Label&gt; [chain:&lt;ChainName&gt;]</code>
+Associate an <i>already tracked</i> wallet with a portfolio.
+<i>Example:</i> <code>/padd My DeFi Bets 0x123...abc</code>
+<i>Example (Specific EVM Chain):</i> <code>/padd My DeFi Bets 0x123...abc chain:arbitrum</code>
+
+• <code>/premove &lt;PortfolioName&gt; &lt;Address|Label&gt; [chain:&lt;ChainName&gt;]</code>
+Remove a wallet's association from a portfolio.
+<i>Example:</i> <code>/premove My DeFi Bets 0x123...abc</code>
+<i>Example (Specific EVM Chain):</i> <code>/premove My DeFi Bets 0x123...abc chain:arbitrum</code>
+
+────────────────────
+<i>✨ The following features are planned for future updates ✨</i>
+────────────────────
+
+<b>🔹 Analytics (Future)</b>
+• <code>/summary [Portfolio|WalletLabel|Address]</code>
+View total value summary.
+
+• <code>/stats [Portfolio|WalletLabel|Address] [Period]</code>
 Performance statistics (e.g. 7d, 30d).
 
-• <code>/chart [Portfolio|Wallet] &lt;Type&gt;</code> <i>(Premium)</i>
+• <code>/chart [Portfolio|WalletLabel|Address] &lt;Type&gt;</code> <i>(Premium)</i>
 Generate a chart (pie, line, etc.).
 
-<b>🔹 Alerts</b>
-• <code>/alert_price_create &lt;Token&gt; &lt;Chain&gt; &lt;above|below&gt; &lt;Price&gt;</code>
-Add a price alert.
+<b>🔹 Alerts (Future)</b>
+• <code>/alert_price_create &lt;TokenSymbol&gt; &lt;above|below&gt; &lt;Price&gt; [Chain]</code>
+Add a price alert for a token.
 
 • <code>/alert_price_list</code>
 List your active price alerts.
 
 • <code>/alert_price_remove &lt;ID&gt;</code>
-Remove a price alert.
+Remove a price alert by its ID.
 
-• <code>/alert_portfolio_create &lt;Portfolio&gt; &lt;above|below&gt; &lt;Value&gt;</code> <i>(Premium)</i>
-Alert on portfolio total value.
+• <code>/alert_value_create &lt;Portfolio|WalletLabel|Address&gt; &lt;above|below&gt; &lt;Value&gt;</code> <i>(Premium)</i>
+Alert on portfolio or wallet total value.
 
-• <code>/alert_portfolio_list</code>
-List portfolio value alerts.
+• <code>/alert_value_list</code>
+List portfolio/wallet value alerts.
 
-• <code>/alert_portfolio_remove &lt;ID&gt;</code>
-Remove a portfolio alert.
+• <code>/alert_value_remove &lt;ID&gt;</code>
+Remove a value alert by its ID.
 
-• <code>/alert_tx_create &lt;Wallet&gt; [MinUSD]</code> <i>(Premium)</i>
-Alert on your wallet’s transactions.
+<b>🔹 Trackers (Future - For External Wallets)</b>
+• <code>/track_add &lt;Address&gt; [Label...]</code>
+Track transactions of an external wallet.
 
-• <code>/alert_tx_list</code>
-List your transaction alerts.
-
-• <code>/alert_tx_remove &lt;Wallet&gt;</code>
-Remove a transaction alert.
-
-<b>🔹 Trackers</b>
-• <code>/tracker_add &lt;Address&gt; &lt;Chain&gt; [Label]</code>
-Track an external wallet.
-
-• <code>/tracker_list</code>
+• <code>/track_list</code>
 List external wallets you’re tracking.
 
-• <code>/tracker_view &lt;Address|Label&gt; [Limit]</code>
-Show recent transactions.
+• <code>/track_view &lt;Address|Label&gt; [Limit]</code>
+Show recent transactions for a tracked external wallet.
 
-• <code>/tracker_set_alert &lt;Address|Label&gt; &lt;on|off&gt;</code> <i>(Premium)</i>
-Toggle transaction alerts.
+• <code>/track_alert &lt;Address|Label&gt; &lt;on|off&gt; [MinUSD]</code> <i>(Premium)</i>
+Toggle transaction alerts for an external wallet.
 
-• <code>/tracker_remove &lt;Address|Label&gt;</code>
+• <code>/track_remove &lt;Address|Label&gt;</code>
 Stop tracking an external wallet.
 
-<b>🔹 Settings & Info</b>
-• <code>/settings_view</code>
-Show your current settings.
-
-• <code>/settings_set_currency &lt;Currency&gt;</code>
-Set your display currency (e.g., USD).
-
-• <code>/settings_set_min_holding &lt;Value&gt;</code>
-Default minimum USD for holdings.
+<b>🔹 Settings & Info (Future)</b>
+• <code>/settings</code>
+View or modify your settings (e.g., currency).
 
 • <code>/premium</code>
-Learn about Premium features & subscription.
+Learn about Premium features & subscription status.

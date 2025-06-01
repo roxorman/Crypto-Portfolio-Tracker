@@ -13,13 +13,13 @@ def get_wallet_portfolio(wallet_address):
     solana1 = "DXm7q65Grad9fAkWVkVCDwt1RJX1ARkntH964cS1FdYd"
     solana2 = "6EXXKyEz5ZWNPzi1jdv3GJ86WjYC6uYRoCAz9YMYQLMG"
     solana_portfolio = solana1 + "," + solana2
-    eth_wallet_addresses = "0xCe100d94EA22aAb119633D434BdEEA26F4244d1a,0x5D39036947e83862cE5f3DB351cC64E3D4592cD5"
+    eth_wallet_addresses = "0xCe100d94EA22aAb119633D434BdEEA26F4244d1a"
     headers = {"Authorization": f"Bearer {MOBULA_API_KEY}"}
     params = {
                 "wallets": eth_wallet_addresses,
                 "filterSpam": "true",
                 "liqmin": "1000",
-                "unlistedAssets": "false",
+                "unlistedAssets": "true",
                 "pnl": "false",
                 "cache": "true",
                 "blockchain": "",   # Leaving blank to get all chains            

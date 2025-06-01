@@ -1,211 +1,279 @@
-from typing import Dict, List, Optional
-from models import Alert, Portfolio, Wallet
-from api_fetcher import PortfolioFetcher
-from notifier import Notifier
-from db_manager import DatabaseManager
 import asyncio
-from datetime import datetime
 import logging
+import time
+from typing import Dict, List, Optional, Any
+from datetime import datetime, timezone
+
+from sqlalchemy.future import select
+from telegram.helpers import escape_markdown
+
+# Assuming these modules and classes will exist or be adjusted
+from db_manager import DatabaseManager
+from notifier import Notifier
+from api_fetcher import PortfolioFetcher
+from models import Alert
+from utils import format_price_dynamically # Added import
 
 logger = logging.getLogger(__name__)
 
 class AlertsManager:
-    """Manages alert checking and notifications for portfolios and tokens."""
-    
-    def __init__(self, db_manager: DatabaseManager, notifier: Notifier, portfolio_fetcher: PortfolioFetcher):
-        self.db = db_manager # <<< STORE the db_manager instance
-        self.notifier = notifier # <<< STORE the notifier instance
-        self.portfolio_fetcher = portfolio_fetcher # <<< STORE the portfolio_fetcher instance
-        self.check_interval = 60  # Check alerts every 60 seconds
-        logger.info("AlertsManager initialized.")
+    def __init__(
+        self,
+        db_manager: DatabaseManager,
+        notifier: Notifier,
+        portfolio_fetcher: PortfolioFetcher,
+        check_interval_seconds: int = 60  # Default check interval 1 minute
+    ):
+        self.db = db_manager
+        self.notifier = notifier
+        self.portfolio_fetcher = portfolio_fetcher
+        self._current_price_cache: Dict[int, float] = {} # {token_mobula_id: price}
+        self.check_interval_seconds = check_interval_seconds
+        self._is_running = False
+        logger.info(f"AlertsManager initialized with check interval: {check_interval_seconds}s")
 
-    async def create_portfolio_alert(self, user_id: int, portfolio_id: int,
-                                   target_value: float, condition: str) -> Alert:
-        """Create a new portfolio value alert."""
-        conditions = {
-            'type': 'portfolio_value',
-            'target_value': target_value,
-            'condition': condition  # 'above' or 'below'
-        }
-        return await self.db.create_alert(
-            user_id=user_id,
-            alert_type='portfolio_value',
-            conditions=conditions,
-            portfolio_id=portfolio_id
-        )
+    async def _fetch_and_cache_prices_for_active_alerts(self) -> bool:
+        """
+        Fetches current prices for all unique tokens in active 'token_price' alerts
+        and populates the internal price cache.
+        """
+        self._current_price_cache.clear()
+        logger.info("Fetching active token price alerts for price caching.")
+        active_alerts: List[Alert] = await self.db.get_active_token_price_alerts()
 
-    async def create_token_alert(self, user_id: int, token_address: str,
-                               target_price: float, condition: str,
-                               chain: str = 'ethereum') -> Alert:
-        """Create a new token price alert."""
-        conditions = {
-            'type': 'token_price',
-            'token_address': token_address,
-            'chain': chain,
-            'target_price': target_price,
-            'condition': condition  # 'above' or 'below'
-        }
-        return await self.db.create_alert(
-            user_id=user_id,
-            alert_type='token_price',
-            conditions=conditions
-        )
-
-    async def create_wallet_alert(self, user_id: int, wallet_id: int,
-                                target_value: float, condition: str) -> Alert:
-        """Create a new wallet value alert."""
-        conditions = {
-            'type': 'wallet_value',
-            'target_value': target_value,
-            'condition': condition  # 'above' or 'below'
-        }
-        return await self.db.create_alert(
-            user_id=user_id,
-            alert_type='wallet_value',
-            conditions=conditions,
-            wallet_id=wallet_id
-        )
-
-    async def check_portfolio_alert(self, alert: Alert, portfolio: Portfolio) -> bool:
-        """Check if a portfolio alert has been triggered."""
-        holdings = await self.portfolio_fetcher.get_portfolio_holdings(portfolio)
-        if not holdings:
+        if not active_alerts:
+            logger.info("No active token price alerts found to fetch prices for.")
             return False
 
-        current_value = holdings['total_value']
-        target_value = alert.conditions['target_value']
-        condition = alert.conditions['condition']
+        unique_cmc_ids = list(set(
+            alert.cmc_id for alert in active_alerts if alert.cmc_id is not None
+        ))
 
-        return (
-            (condition == 'above' and current_value >= target_value) or
-            (condition == 'below' and current_value <= target_value)
-        )
-
-    async def check_wallet_alert(self, alert: Alert, wallet: Wallet) -> bool:
-        """Check if a wallet alert has been triggered."""
-        holdings = await self.portfolio_fetcher.get_wallet_holdings(wallet)
-        if not holdings:
+        if not unique_cmc_ids:
+            logger.info("No unique CMC IDs found in active token price alerts.")
             return False
 
-        current_value = holdings['total_value']
-        target_value = alert.conditions['target_value']
-        condition = alert.conditions['condition']
-
-        return (
-            (condition == 'above' and current_value >= target_value) or
-            (condition == 'below' and current_value <= target_value)
-        )
-
-    async def check_token_alert(self, alert: Alert) -> bool:
-        """Check if a token price alert has been triggered."""
+        logger.info(f"Fetching prices for {len(unique_cmc_ids)} unique CMC IDs: {unique_cmc_ids}")
+        
         try:
-            token_address = alert.conditions['token_address']
-            chain = alert.conditions['chain']
-            target_price = alert.conditions['target_price']
-            condition = alert.conditions['condition']
+            # fetch_cmc_token_quotes returns the 'data' part of the CMC API response
+            # This 'data' is a dictionary where keys are stringified CMC IDs (or symbols/slugs if used for query)
+            # and values are token data objects.
+            api_data_map = await self.portfolio_fetcher.fetch_cmc_token_quotes(ids=unique_cmc_ids)
+            
+            if api_data_map:
+                for cmc_id_str, token_data_obj in api_data_map.items():
+                    # If queried by ID, CMC might return a single object directly, not a list.
+                    # If queried by symbol/slug, it returns a list.
+                    # Since we query by ID list here, each key (cmc_id_str) should map to a single token object.
+                    
+                    token_entry = None
+                    if isinstance(token_data_obj, list) and token_data_obj:
+                        token_entry = token_data_obj[0] # Take the first if it's a list (should not happen if queried by ID)
+                    elif isinstance(token_data_obj, dict):
+                        token_entry = token_data_obj
 
-            # Get current token price from Mobula API
-            current_price = await self.get_token_price(token_address, chain)
-            if not current_price:
-                return False
+                    if token_entry:
+                        price_quote = token_entry.get("quote", {}).get("USD", {})
+                        price = price_quote.get("price")
+                        actual_cmc_id = token_entry.get("id") # Use the ID from the response data for consistency
 
-            return (
-                (condition == 'above' and current_price >= target_price) or
-                (condition == 'below' and current_price <= target_price)
-            )
-        except Exception as e:
-            print(f"Error checking token alert: {e}")
-            return False
-
-    async def get_token_price(self, token_address: str, chain: str) -> Optional[float]:
-        """Get current token price from Mobula API."""
-        try:
-            url = f"{self.portfolio_fetcher.base_url}/tokens/prices"
-            params = {
-                "addresses": token_address,
-                "blockchain": chain
-            }
-            headers = {"Authorization": self.portfolio_fetcher.api_key}
-
-            response = requests.get(url, params=params, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-
-            if data and isinstance(data, dict) and data.get('data'):
-                return float(data['data'][0]['price'])
-            return None
-        except Exception as e:
-            print(f"Error fetching token price: {e}")
-            return None
-
-    async def format_alert_message(self, alert: Alert, triggered_value: float) -> str:
-        """Format alert notification message."""
-        alert_type = alert.conditions['type']
-        condition = alert.conditions['condition']
-        target_value = alert.conditions['target_value']
-
-        if alert_type == 'portfolio_value':
-            return (
-                "🚨 Portfolio Alert!\n"
-                f"Portfolio value is now ${triggered_value:,.2f}\n"
-                f"Target was {condition} ${target_value:,.2f}"
-            )
-        elif alert_type == 'wallet_value':
-            return (
-                "🚨 Wallet Alert!\n"
-                f"Wallet value is now ${triggered_value:,.2f}\n"
-                f"Target was {condition} ${target_value:,.2f}"
-            )
-        elif alert_type == 'token_price':
-            return (
-                "🚨 Price Alert!\n"
-                f"Token price is now ${triggered_value:,.4f}\n"
-                f"Target was {condition} ${target_value:,.4f}"
-            )
-
-    async def check_all_alerts(self):
-        """Check all active alerts."""
-        while True:
-            try:
-                # Get all active alerts from database
-                alerts = await self.db.get_active_alerts()
+                        if actual_cmc_id is not None and price is not None:
+                            try:
+                                self._current_price_cache[int(actual_cmc_id)] = float(price)
+                            except ValueError:
+                                logger.error(f"Could not parse price for CMC ID {actual_cmc_id}: {price}")
+                        else:
+                            logger.warning(f"Missing id or price in token data from CMC API for queried ID {cmc_id_str}: {token_entry}")
+                    else:
+                        logger.warning(f"No token data found in CMC response for queried ID {cmc_id_str}")
                 
-                for alert in alerts:
-                    triggered = False
-                    triggered_value = 0
+                if self._current_price_cache:
+                    logger.info(f"Successfully cached prices from CMC for {len(self._current_price_cache)} tokens.")
+                    return True
+                else:
+                    logger.warning("Price cache is empty after processing API response.")
+                    return False
+            else:
+                logger.error(f"Failed to fetch or parse market multi-data. API Response: {str(api_response)[:500]}")
+                return False
+        except Exception as e:
+            logger.exception(f"Error during price fetching and caching: {e}")
+            return False
 
-                    if alert.conditions['type'] == 'portfolio_value' and alert.portfolio_id:
-                        portfolio = await self.db.get_portfolio(alert.portfolio_id)
-                        triggered = await self.check_portfolio_alert(alert, portfolio)
-                        if triggered:
-                            holdings = await self.portfolio_fetcher.get_portfolio_holdings(portfolio)
-                            triggered_value = holdings['total_value']
+    async def _evaluate_and_notify_token_alerts(self):
+        """
+        Evaluates active token price alerts against cached prices and sends notifications if triggered.
+        """
+        if not self._current_price_cache:
+            logger.warning("Price cache is empty. Skipping token alert evaluation.")
+            return
 
-                    elif alert.conditions['type'] == 'wallet_value' and alert.wallet_id:
-                        wallet = await self.db.get_wallet(alert.wallet_id)
-                        triggered = await self.check_wallet_alert(alert, wallet)
-                        if triggered:
-                            holdings = await self.portfolio_fetcher.get_wallet_holdings(wallet)
-                            triggered_value = holdings['total_value']
+        active_alerts: List[Alert] = await self.db.get_active_token_price_alerts()
+        if not active_alerts:
+            logger.info("No active token price alerts to evaluate.")
+            return
 
-                    elif alert.conditions['type'] == 'token_price':
-                        triggered = await self.check_token_alert(alert)
-                        if triggered:
-                            triggered_value = await self.get_token_price(
-                                alert.conditions['token_address'],
-                                alert.conditions['chain']
-                            )
+        logger.info(f"Evaluating {len(active_alerts)} active token price alerts against {len(self._current_price_cache)} cached prices.")
+        triggered_count = 0
 
-                    if triggered:
-                        # Format and send notification
-                        message = await self.format_alert_message(alert, triggered_value)
-                        await self.notifier.send_alert_notification(alert.user_id, message)
-                        
-                        # Deactivate one-time alerts
-                        if not alert.conditions.get('recurring', False):
-                            await self.db.deactivate_alert(alert.alert_id)
+        for alert in active_alerts:
+            if not alert.is_active or alert.alert_type != 'token_price' or alert.cmc_id is None: # Use cmc_id
+                continue 
+
+            current_price = self._current_price_cache.get(alert.cmc_id) # Use cmc_id
+            if current_price is None:
+                logger.warning(f"No cached price found for CMC ID {alert.cmc_id} (Alert ID: {alert.alert_id}). Skipping.")
+                continue
+
+            conditions = alert.conditions
+            target_price = conditions.get("target_price")
+            condition_type = conditions.get("condition", "").lower()
+            label = conditions.get("label", "N/A")
+
+            if target_price is None or not condition_type:
+                logger.error(f"Alert ID {alert.alert_id} has invalid conditions: {conditions}. Skipping.")
+                continue
+            
+            try:
+                target_price = float(target_price)
+            except ValueError:
+                logger.error(f"Alert ID {alert.alert_id} has non-float target_price: {target_price}. Skipping.")
+                continue
+
+            alert_triggered = False
+            if condition_type == "above" and current_price > target_price:
+                alert_triggered = True
+            elif condition_type == "below" and current_price < target_price:
+                alert_triggered = True
+
+            if alert_triggered:
+                logger.info(f"Token Price Alert TRIGGERED: Alert ID {alert.alert_id} for User {alert.user_id}. Token: {alert.token_display_name}, Condition: {condition_type} {target_price}, Current Price: {current_price}")
+                triggered_count += 1
+
+                # Construct MarkdownV2 message
+                label_escaped = escape_markdown(label, version=2)
+                token_display_name_escaped = escape_markdown(alert.token_display_name or "Unknown Token", version=2)
+                condition_type_escaped = escape_markdown(condition_type.capitalize(), version=2)
+
+                current_price_str = f"${format_price_dynamically(current_price)}"
+                target_price_str = f"${format_price_dynamically(target_price)}" # Using .2f for target as it's user-defined
+
+                # The final sentence needs its period escaped for MarkdownV2.
+                final_message_part = "This alert has now been deactivated\." # Escaped period
+
+                notification_message = (
+                    f"🚨 *Price Alert Triggered* 🚨\n\n"
+                    f"🔔 *Label*: _{label_escaped}_\n"
+                    f"🪙 *Token*: *{token_display_name_escaped}*\n"
+                    f"📈 *Current Price*: `{current_price_str}`\n"
+                    f"🎯 *Condition*: {condition_type_escaped} `{target_price_str}`\n\n"
+                    f"{final_message_part}"
+                )
+                
+                send_success = await self.notifier.send_alert_notification(
+                    chat_id=alert.user_id, 
+                    message=notification_message, 
+                    parse_mode="MarkdownV2"
+                )
+
+                if not send_success:
+                    logger.error(f"Failed to send MarkdownV2 alert for Alert ID {alert.alert_id}. Attempting plain text.")
+                    plain_text_message = (
+                        f"Price Alert Triggered!\n\n"
+                        f"Label: {label}\n"
+                        f"Token: {alert.token_display_name or 'Unknown Token'}\n"
+                        f"Current Price: ${format_price_dynamically(current_price)}\n"
+                        f"Condition: {condition_type.capitalize()} ${format_price_dynamically(target_price)}\n\n"
+                        f"This alert has now been deactivated."
+                    )
+                    send_success = await self.notifier.send_alert_notification(
+                        chat_id=alert.user_id,
+                        message=plain_text_message,
+                        parse_mode=None
+                    )
+                
+                if send_success:
+                    logger.info(f"Successfully sent notification for Alert ID {alert.alert_id} to User {alert.user_id}.")
+                else:
+                    logger.error(f"Failed to send notification for Alert ID {alert.alert_id} to User {alert.user_id} after fallback.")
+                
+                # Deactivate alert in DB
+                deactivated = await self.db.deactivate_alert_and_log_trigger(
+                    alert_id=alert.alert_id, 
+                    triggered_price=current_price
+                )
+                if not deactivated:
+                    logger.error(f"Failed to deactivate Alert ID {alert.alert_id} in database.")
+        
+        if triggered_count > 0:
+            logger.info(f"Finished evaluating token alerts. Triggered {triggered_count} alerts in this cycle.")
+        else:
+            logger.info("Finished evaluating token alerts. No alerts triggered in this cycle.")
+
+
+    async def check_all_alerts_loop(self):
+        """
+        Main loop that periodically fetches prices and evaluates all types of alerts.
+        """
+        self._is_running = True
+        logger.info("AlertsManager polling loop started.")
+        
+        while self._is_running:
+            cycle_start_time = time.monotonic()
+            logger.info(f"--- Starting new alert check cycle at {datetime.now(timezone.utc)} ---")
+
+            try:
+                # --- Token Price Alerts ---
+                prices_fetched = await self._fetch_and_cache_prices_for_active_alerts()
+                if prices_fetched:
+                    await self._evaluate_and_notify_token_alerts()
+                else:
+                    logger.info("Skipping token alert evaluation as no prices were fetched/cached.")
+
+                # --- Placeholder for other alert types ---
+                # Example: await self._evaluate_portfolio_value_alerts()
+                # Example: await self._evaluate_transaction_alerts()
+                
+                logger.info("All alert types processed for this cycle.")
 
             except Exception as e:
-                print(f"Error checking alerts: {e}")
+                logger.exception(f"Critical error in alert checking cycle: {e}")
+                # Avoid rapid-fire loops on persistent errors; add a longer sleep
+                await asyncio.sleep(self.check_interval_seconds * 2) 
 
-            await asyncio.sleep(self.check_interval)
+            cycle_duration = time.monotonic() - cycle_start_time
+            logger.info(f"--- Alert check cycle completed in {cycle_duration:.2f} seconds ---")
+            
+            sleep_duration = self.check_interval_seconds - cycle_duration
+            if sleep_duration > 0:
+                logger.info(f"Sleeping for {sleep_duration:.2f} seconds until next cycle.")
+                await asyncio.sleep(sleep_duration)
+            else:
+                logger.warning(f"Alert cycle duration ({cycle_duration:.2f}s) exceeded check interval ({self.check_interval_seconds}s). Starting next cycle immediately.")
+                await asyncio.sleep(1) # Brief sleep to prevent tight loop if consistently overrunning
+
+        logger.info("AlertsManager polling loop stopped.")
+
+    def stop_loop(self):
+        """Signals the polling loop to stop."""
+        logger.info("Stop signal received for AlertsManager loop.")
+        self._is_running = False
+
+# Example of how it might be run (e.g., in main.py)
+# async def main():
+#     # Initialize db_manager, notifier, portfolio_fetcher
+#     # ...
+#     alerts_mgr = AlertsManager(db_manager, notifier, portfolio_fetcher, check_interval_seconds=60)
+#     try:
+#         await alerts_mgr.check_all_alerts_loop()
+#     except KeyboardInterrupt:
+#         logger.info("Alerts manager loop interrupted by user.")
+#     finally:
+#         alerts_mgr.stop_loop() # Ensure loop can exit if it's still running
+#         # Perform any other cleanup
+#
+# if __name__ == '__main__':
+#     # Setup basic logging for standalone testing if needed
+#     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+#     # asyncio.run(main())
