@@ -297,8 +297,6 @@ The selection of filters affects the composition of the aggregated portfolio res
 **Description**:
 This endpoint returns a list of wallet positions.
 
-This endpoint supports testnets. To get data for testnets use `X-Env` header.
-
 > NOTE: This endpoint supports a lot of filters, sorting and pagination parameters. Make sure that a request URL length is in a safe range for your platform. Usually, 2000 characters are the safe limit in virtually any combination of client and server software.
 
 > NOTE: Consider all IDs as abstract strings, without making any assumptions about their format or relying on such assumptions. There is a non-zero probability that IDs may change in the future, and this should not result in any breaking changes.
@@ -308,19 +306,13 @@ This endpoint supports testnets. To get data for testnets use `X-Env` header.
 
 - `only_simple`: Retrieves exclusively wallet-type positions. These are basic, non-protocol related positions. This option is applied if parameter is not specified.
 - `only_complex`: Fetches only positions associated with all DeFi protocols (including staked assets, liquidity pools, etc), like Uniswap or Aave. This option excludes simple wallet positions.
+
 - `no_filter`: Applies no filtering, thus returning both protocol-related and simple wallet positions.
 
-> ⚠️ Note: Different pricing models are applied for enterprise usage of this API, depending on the filter type selected. For detailed pricing information, please reach out to us at `api@zerion.io`.
 
-- `` (, optional): 
-- `` (, optional): 
-- `filter[position_types]` (query, optional): Keep only positions with these types.
-- `filter[chain_ids]` (query, optional): Keep only positions from these chains. Available chain ids can be found in chains endpoints.
-- `filter[fungible_ids]` (query, optional): Keep only positions related to given fungible assets.
-- `filter[dapp_ids]` (query, optional): Keep only positions related to these decentralized applications (dapps).
-- `filter[trash]` (query, optional): Filter positions based on the `is_trash` flag. If no flag is specified, then `only_non_trash` is applied.
-- `sort` (query, optional): Choose how the result should be ordering
-- `X-Env` (header, optional): Custom header that allows you to get data for testnets.
+- `filter[chain_ids]` (query, optional): Keeps only positions from these chains. Default none, possible chains we will store in a set 
+- `filter[trash]` (query, optional): Filter positions based on the `is_trash` flag. If no flag is specified (DEFAULT), then `only_non_trash` is applied.
+- `sort` (query, optional): Choose how the result should be ordering. Default to 'value'
 
 **Response Schema:**
 ```yaml

@@ -12,13 +12,19 @@ class ZerionPositionFilter(Enum):
     """
     SIMPLE = "only_simple"  # Default: Tokens, NFTs, etc. Excludes complex positions.
     LOCKED = "only_complex"  # Positions that are locked (e.g., vested tokens, staked assets with lockups).
-    # You could add other Zerion supported filters here if needed, e.g.:
-    # NO_FILTER = "no_filter" # All positions
-    # COMPLEX = "only_complex" # Liquidity pools, staking, lending, etc.
-    # CLAIMABLE = "only_claimable" # Claimable rewards or assets
+    NO_FILTER = "no_filter" # All positions
+    COMPLEX = "only_complex" # Liquidity pools, staking, lending, etc.
+
+class ZerionTrashFilter(Enum):
+    """
+    Defines how to filter positions based on the 'is_trash' flag.
+    """
+    ONLY_TRASH = "only_trash"
+    ONLY_NON_TRASH = "only_non_trash"
+    INCLUDE_TRASH = "include_trash"
 
 class PortfolioFetcher:
-    """Handles fetching raw portfolio data using Mobula API and pre-filtering."""
+    """Handles fetching raw portfolio data using various APIs."""
 
     def __init__(self):
         self.config = Config()
@@ -206,11 +212,11 @@ class PortfolioFetcher:
             return None
 
 
-    async def fetch_zerion_evm_portfolio_data(
+    async def zerion_portfolio_data(
         self,
         evm_address: str,
         chains_filter: Optional[List[str]] = None,  # e.g., ["ethereum", "polygon"]
-        position_type_filter: ZerionPositionFilter = ZerionPositionFilter.SIMPLE
+        position_filter: ZerionPositionFilter = ZerionPositionFilter.SIMPLE
     ) -> Optional[Dict[str, Any]]:
         """
         Fetches portfolio data for a given EVM address using Zerion API.
@@ -220,7 +226,7 @@ class PortfolioFetcher:
         Args:
             evm_address: The EVM wallet address.
             chains_filter: Optional list of Zerion chain IDs to filter by.
-            position_type_filter: Determines the type of positions to fetch.
+            position_filter: Determines the type of positions to fetch.
                 Defaults to ZerionPositionFilter.SIMPLE (only_simple).
                 Use ZerionPositionFilter.LOCKED for locked/vested positions.
 
@@ -233,7 +239,7 @@ class PortfolioFetcher:
 
         url = f"{self.zerion_base_url}/wallets/{evm_address}/portfolio"
         params: Dict[str, Any] = {
-            "filter[positions]": position_type_filter.value,
+            "filter[positions]": position_filter.value,
             "currency": "usd"  # Request values in USD
             # Add pagination params later if needed: page[size], page[before], page[after]
         }
@@ -284,8 +290,52 @@ class PortfolioFetcher:
         except Exception as e:
             self.logger.exception(f"Unexpected error during Zerion /portfolio request for {evm_address}: {e}")
             return None
+        
+    async def zerion_positions_data(
+        self,
+        evm_address: str,
+        position_filter: ZerionPositionFilter = ZerionPositionFilter.SIMPLE,
+        trash_filter: ZerionTrashFilter = ZerionTrashFilter.ONLY_NON_TRASH,
+        chain_filter: Optional[List[str]] = None,
+        sort_by: str = 'value'
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Fetches a list of wallet positions from the Zerion API.
+        """
+        if not self.zerion_api_key:
+            self.logger.error("ZERION_API_KEY is not configured.")
+            return None
 
-if __name__ == "__main__":
+        url = f"{self.zerion_base_url}/wallets/{evm_address}/positions"
+        params = {
+            "filter[positions]": position_filter.value,
+            "filter[trash]": trash_filter.value,
+            "sort": sort_by,
+            "currency": "usd"
+        }
+        if chain_filter:
+            params["filter[chain_ids]"] = ",".join(chain_filter)
+
+        auth_header = {
+            "accept": "application/json",
+            "authorization": self.zerion_api_key
+        }
+        self.logger.info(f"Fetching Zerion /positions for address: {evm_address}, params: {params}")
+
+        try:
+            async with aiohttp.ClientSession(headers=auth_header, timeout=aiohttp.ClientTimeout(total=30)) as session:
+                async with session.get(url, params=params) as response:
+                    self.logger.debug(f"Zerion API request to {response.url} status: {response.status}")
+                    response.raise_for_status()
+                    return await response.json()
+        except aiohttp.ClientResponseError as e:
+            self.logger.error(f"Zerion API error ({e.status}) for /positions {evm_address}: {e.message}. URL: {e.request_info.url}")
+            return None
+        except Exception as e:
+            self.logger.exception(f"Unexpected error during Zerion /positions request for {evm_address}: {e}")
+            return None
+
+if  __name__ == "__main__":
     import json 
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     
@@ -303,10 +353,15 @@ if __name__ == "__main__":
         position_type_filter = ZerionPositionFilter.LOCKED  # Change to LOCKED if you want locked positions
         # test_evm_address = "0xde0b295669a9fd93d5f28d9ec85e40f4cb697bae" # Another example
         print(f"\n--- Testing fetch_zerion_evm_portfolio_data for address: {test_evm_address} ---")
-        zerion_data = await fetcher.fetch_zerion_evm_portfolio_data(test_evm_address, position_type_filter=ZerionPositionFilter.SIMPLE)
+        zerion_data = await fetcher.zerion_positions_data(test_evm_address, )
         if zerion_data is not None:
             print(f"Fetched {len(zerion_data)} assets from Zerion.")
-            print(json.dumps(zerion_data, indent=2))
+            # print the first 3 assets in 'data' { 'attributes}
+            if 'data' in zerion_data and isinstance(zerion_data['data'], list):
+                for i, asset in enumerate(zerion_data['data'][:3]):
+                    print(json.dumps(asset, indent=4))
+            else:
+                print("No assets found in Zerion data or unexpected structure.")
             # Save to file (optional)
             # with open("zerion_portfolio_test.json", "w") as json_file:
             #     json.dump(zerion_data, json_file, indent=4)
@@ -314,4 +369,4 @@ if __name__ == "__main__":
         else:
             print(f"Failed to fetch Zerion data for {test_evm_address} or an error occurred.")
 
-    asyncio.run(main_test())
+asyncio.run(main_test())
