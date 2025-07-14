@@ -33,8 +33,6 @@ Manage your individual wallet addresses here.
 
 💎 <b>Premium</b>
 Upgrade to a Premium plan to unlock higher limits for wallets, alerts, and API calls.
- • <b>Free Tier:</b> 3 Wallets, 3 Alerts, 10 API Calls/Day
- • <b>Premium Tier:</b> 10 Wallets, 10 Alerts, 30 API Calls/Day
 
 ⚙️ <b>Settings</b>
 <i>This feature is coming soon!</i>

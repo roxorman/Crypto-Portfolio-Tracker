@@ -11,10 +11,14 @@ from api_fetcher import PortfolioFetcher
 from alerts_manager import AlertsManager
 from notifier import Notifier
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 class Scheduler:
     """Handles scheduled tasks like portfolio updates and alert checking."""
 
-    def __init__(self, db_manager: DatabaseManager, portfolio_fetcher: PortfolioFetcher, alerts_manager: AlertsManager, notifier: Notifier):
+    def __init__(self, db_manager: DatabaseManager, notifier: Notifier, portfolio_fetcher: PortfolioFetcher = None, alerts_manager: AlertsManager = None):
         self.db = db_manager
         self.portfolio_fetcher = portfolio_fetcher
         self.alerts_manager = alerts_manager
@@ -25,6 +29,7 @@ class Scheduler:
         self.update_interval = 3600  # Update portfolios every hour
         self.alert_interval = 60     # Check alerts every minute
         self.snapshot_interval = 86400  # Take daily snapshots
+        self.premium_check_interval = 3600 # Check for expired premiums every hour
 
     async def start(self):
         """Start all scheduled tasks."""
@@ -60,9 +65,10 @@ class Scheduler:
 
     async def _start_alert_checking(self):
         """Start alert checking task."""
-        self.running_tasks['alert_checker'] = asyncio.create_task(
-            self.alerts_manager.check_all_alerts()
-        )
+        if self.alerts_manager:
+            self.running_tasks['alert_checker'] = asyncio.create_task(
+                self.alerts_manager.check_all_alerts()
+            )
 
     async def _start_daily_snapshots(self):
         """Start daily portfolio snapshot task."""
@@ -173,3 +179,20 @@ class Scheduler:
             hour=0, minute=0, second=0, microsecond=0
         )
         await asyncio.sleep((next_day - now).total_seconds())
+
+    async def check_premium_expirations_loop(self):
+        """Periodically check for expired premium users and revert their status."""
+        while True:
+            try:
+                expired_users = await self.db.get_expired_premium_users()
+                for user in expired_users:
+                    logger.info(f"Premium expired for user {user.user_id}. Reverting to standard plan.")
+                    await self.db.set_user_premium_status(user.user_id, is_premium=False)
+                    await self.notifier.send_message(
+                        user.user_id,
+                        "Your premium subscription has expired. You have been reverted to the standard plan."
+                    )
+            except Exception as e:
+                logger.error(f"Error in premium expiration loop: {e}")
+            
+            await asyncio.sleep(self.premium_check_interval)

@@ -2,7 +2,8 @@ from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from typing import Dict, Optional, List
 from config import Config
 import io
-from telegram.helpers import escape_markdown # Keep escape_markdown for potential use
+from telegram.helpers import escape_markdown
+from utils import split_message
 import logging
 
 logger = logging.getLogger(__name__)
@@ -21,20 +22,22 @@ class Notifier:
 
     async def send_message(self, chat_id: int, text: str,
                           reply_markup: Optional[InlineKeyboardMarkup] = None,
-                          parse_mode: Optional[str] = None) -> bool: # Re-added parse_mode parameter
+                          parse_mode: Optional[str] = None) -> bool:
         """Send a text message to a specific chat, allowing custom parse_mode."""
-        # Use provided parse_mode, default to None (plain text) if not specified by caller
         try:
-            await self.bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                parse_mode=parse_mode, # Pass the parse_mode argument
-                reply_markup=reply_markup
-            )
-            logger.info(f"Message sent to user {chat_id} (parse_mode={parse_mode or 'None'})") # Log parse_mode
+            message_chunks = split_message(text)
+            for i, chunk in enumerate(message_chunks):
+                # Only the last chunk should have the reply_markup
+                current_reply_markup = reply_markup if i == len(message_chunks) - 1 else None
+                await self.bot.send_message(
+                    chat_id=chat_id,
+                    text=chunk,
+                    parse_mode=parse_mode,
+                    reply_markup=current_reply_markup
+                )
+            logger.info(f"Message sent to user {chat_id} (parse_mode={parse_mode or 'None'})")
             return True
         except Exception as e:
-            # Log the parse mode attempted when error occurs
             logger.error(f"Error sending message (parse_mode={parse_mode or 'None'}): {e}")
             return False
 
@@ -88,7 +91,7 @@ class Notifier:
             logger.error(f"Error sending wallet summary: {e}")
             return False
 
-    async def send_alert_notification(self, chat_id: int, message: str, parse_mode: str = "MarkdownV2") -> bool:
+    async def send_alert_notification(self, chat_id: int, message: str, parse_mode: str = "MarkdownV2", reply_markup: Optional[InlineKeyboardMarkup] = None) -> bool:
         """
         Send alert notification message.
         Defaults to MarkdownV2 for richer formatting.
@@ -97,7 +100,7 @@ class Notifier:
         try:
             # The message is now expected to be fully formatted by the caller.
             # The "🚨 ALERT 🚨" prefix or similar should be part of the 'message' argument if desired.
-            return await self.send_message(chat_id, message, parse_mode=parse_mode)
+            return await self.send_message(chat_id, message, parse_mode=parse_mode, reply_markup=reply_markup)
         except Exception as e:
             logger.error(f"Error sending alert notification (parse_mode={parse_mode}): {e}")
             return False

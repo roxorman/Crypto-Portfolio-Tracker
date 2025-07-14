@@ -21,9 +21,9 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 sys.path.insert(0, os.path.realpath(os.path.join(os.path.dirname(__file__), '..')))
 
 try:
-    from models import Base  # <<< Import your Base model from models.py
+    from scripts.models import Base  # <<< Import your Base model from models.py
 except ImportError as e:
-    sys.stderr.write(f"Error: Failed to import Base from models.py. Check sys.path: {e}\n")
+    sys.stderr.write(f"Error: Failed to import Base from scripts/models.py. Check sys.path: {e}\n")
     sys.exit(1)
 
 # this is the Alembic Config object, which provides

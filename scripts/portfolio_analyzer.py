@@ -7,11 +7,9 @@ logger = logging.getLogger(__name__)
 
 class PortfolioAnalyzer:
     """
-    Analyzes pre-filtered portfolio data fetched from APIs (like Mobula)
-    and formats it for presentation using MarkdownV2. Assumes input assets meet a minimum
-    total value threshold.
+    Analyzes portfolio data fetched from APIs and formats it for presentation.
     """
-    def __init__(self, min_token_value: float = 1.0, top_n_tokens: int = 10):
+    def __init__(self, min_token_value: float = 1.0, top_n_tokens: int = 100):
         """
         Args:
             min_token_value: Minimum USD value for an *individual* token holding
@@ -27,6 +25,209 @@ class PortfolioAnalyzer:
         """Helper to escape text for MarkdownV2."""
         return escape_markdown(str(text), version=2)
 
+    def process_zerion_data(self, positions: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Processes a list of position objects from the Zerion API.
+
+        Args:
+            positions: The 'data' list from the Zerion /positions endpoint.
+
+        Returns:
+            A dictionary with processed data: top 10 positions, other value, and chain values.
+        """
+        if not positions:
+            return {
+                "top_10_positions": [],
+                "other_value": 0.0,
+                "chain_values": {}
+            }
+        
+        top_10 = []
+        other_value = 0.0
+        chain_values = defaultdict(float)
+        valid_positions = []
+        significant_positions_count = 0
+
+        for pos in positions:
+            try:
+                attributes = pos.get('attributes', {})
+                value = attributes.get('value')
+                price = attributes.get('price')
+                if value is None or price is None:
+                    continue
+
+                value = float(value)
+                price = float(price)
+                
+                if price == 0:
+                    continue
+                if value >= 1:
+                    significant_positions_count += 1
+                if value < 0.05:
+                    continue
+
+                fungible_info = attributes.get('fungible_info', {})
+                name = fungible_info.get('name', 'N/A')
+                symbol = fungible_info.get('symbol', 'N/A')
+                quantity_str = attributes.get('quantity', {}).get('numeric', '0')
+                quantity = float(quantity_str)
+                chain_id = pos.get('relationships', {}).get('chain', {}).get('data', {}).get('id', 'unknown')
+                position_type = attributes.get('position_type')
+
+                valid_positions.append({
+                    "name": name,
+                    "symbol": symbol,
+                    "value": value,
+                    "quantity": quantity,
+                    "chain": chain_id,
+                    "position_type": position_type,
+                })
+            except (ValueError, TypeError) as e:
+                self.logger.warning(f"Could not process a Zerion position, skipping. Error: {e}, Position: {pos}")
+                continue
+
+        # Sort positions by value (highest to lowest)
+        sorted_positions = sorted(valid_positions, key=lambda x: x['value'], reverse=True)
+
+        # Get top 10 positions
+        top_10 = sorted_positions[:self.top_n_tokens]
+
+        # Calculate other_value and chain_values
+        top_10_values = sum(pos["value"] for pos in top_10)
+        other_value = sum(pos["value"] for pos in sorted_positions) - top_10_values
+
+        for pos in top_10:
+            chain_id = pos["chain"]
+            chain_values[chain_id] += pos["value"]
+
+        # Convert defaultdict to dict for the final output
+        return {
+            "top_10_positions": top_10,
+            "other_value": other_value,
+            "chain_values": dict(chain_values),
+            "total_positions": len(positions),
+            "significant_positions_count": significant_positions_count
+        }
+
+    def format_zerion_holdings_message(self, processed_data: Dict[str, Any], wallet_label: str, wallet_address: str) -> str:
+        """
+        Formats the processed Zerion data into a user-friendly MarkdownV2 message.
+        """
+        top_10 = processed_data.get("top_10_positions", [])
+        if not processed_data or not top_10:
+            return self._md_escape("No positions found for this wallet.")
+            
+        other_value = processed_data.get("other_value", 0.0)
+        chain_values = processed_data.get("chain_values", {})
+        
+        # Header
+        header_label = self._md_escape(wallet_label) if wallet_label else f"\\.\\.\\.{self._md_escape(wallet_address[-4:])}"
+        safe_addr_snippet = self._md_escape(f" (...{wallet_address[-4:]})")
+
+        total_value = sum(p['value'] for p in top_10) + other_value
+        
+        message_parts = [
+            f"📊 *Detailed Holdings for: {header_label}*{safe_addr_snippet}",
+            f"💰 *Total Value:* \\${self._md_escape(f'{total_value:,.2f}')}",
+            ""
+        ]
+        
+        # Top Positions
+        message_parts.append("*Top Positions:*")
+        for i, pos in enumerate(top_10):
+            # Get data for the current position
+            name = pos.get('name', 'N/A')
+            position_type = pos.get('position_type')
+            value = pos.get('value', 0.0)
+            quantity = pos.get('quantity', 0.0)
+            chain = pos.get('chain', 'unknown')
+
+            # Construct the name part, adding the position type if it's not 'wallet'
+            display_name = name
+            if position_type and position_type != 'wallet':
+                display_name += f" ({position_type})"
+            escaped_display_name = self._md_escape(display_name)
+
+            # Construct the bolded value part
+            value_str = self._md_escape(f"{value:,.2f}")
+            bold_value_part = f"*\\${value_str}*"
+
+            # Construct the quantity part in code format for a different look
+            quantity_formatted = f"{quantity:g}"
+            quantity_text_part = f"({quantity_formatted} tokens)"
+            escaped_quantity_text = self._md_escape(quantity_text_part)
+            code_quantity_part = f"`{escaped_quantity_text}`"
+
+            # Construct the chain part
+            escaped_chain = self._md_escape(chain.capitalize())
+
+            # Assemble the final, compact line
+            message_parts.append(
+                f"{i+1}\\. {escaped_display_name}: {bold_value_part} {code_quantity_part}  on {escaped_chain}"
+            )
+        message_parts.append("")
+
+        # Other positions value
+        if other_value > 0.01:
+            other_value_str = self._md_escape(f"{other_value:,.2f}")
+            message_parts.append(f"*Rest/Other:* \\${other_value_str}")
+            message_parts.append("")
+
+        # Value by Chain
+        if chain_values:
+            message_parts.append("*Value by Chain:*")
+            sorted_chains = sorted(chain_values.items(), key=lambda item: item[1], reverse=True)
+            for chain, value in sorted_chains:
+                chain_name = self._md_escape(chain.capitalize())
+                chain_value_str = self._md_escape(f"{value:,.2f}")
+                message_parts.append(f"  • {chain_name}: \\${chain_value_str}")
+
+        full_message = "\n".join(message_parts)
+        return full_message
+    
+    def format_zerion_summary_message(self, summary_data: dict, wallet_label: str, wallet_address: str) -> str:
+        """
+        Formats the processed summary Zerion data into a user-friendly MarkdownV2 message.
+        """
+        if not summary_data or 'attributes' not in summary_data:
+            return self._md_escape("Could not retrieve wallet summary.")
+
+        attributes = summary_data.get('attributes', {})
+        total_value = attributes.get('total', {}).get('positions', 0.0)
+        
+        header_label = self._md_escape(wallet_label) if wallet_label else f"\\.\\.\\.{self._md_escape(wallet_address[-4:])}"
+        safe_addr_snippet = self._md_escape(f" (...{wallet_address[-4:]})")
+        
+        change_1d = attributes.get('changes', {}).get('percent_1d', 0.0)
+        change_prefix = "+" if change_1d >= 0 else ""
+        change_str = f"{change_prefix}{change_1d:.2f}"
+        
+        message_parts = [
+            f"📊 *Summary for: {header_label}*{safe_addr_snippet}",
+            f"💰 *Total Value:* \\${self._md_escape(f'{total_value:,.2f}')} \\({self._md_escape(change_str)}\\%\\)",
+            ""
+        ]
+        
+        # Breakdown by Type
+        by_type = attributes.get('positions_distribution_by_type', {})
+        if any(v > 0 for v in by_type.values()):
+            message_parts.append("*Breakdown by Type:*")
+            for pos_type, value in by_type.items():
+                if value > 0.01:
+                    message_parts.append(f"  • {self._md_escape(pos_type.capitalize())}: \\${self._md_escape(f'{value:,.2f}')}")
+            message_parts.append("")
+
+        # Value by Chain
+        by_chain = attributes.get('positions_distribution_by_chain', {})
+        if by_chain:
+            message_parts.append("*Value by Chain:*")
+            sorted_chains = sorted(by_chain.items(), key=lambda item: item[1], reverse=True)
+            for chain, value in sorted_chains:
+                if value > 0.01:
+                    message_parts.append(f"  • {self._md_escape(chain.capitalize())}: \\${self._md_escape(f'{value:,.2f}')}")
+
+        return "\n".join(message_parts)
+        
     def _initialize_aggregated_data(self) -> Dict[str, Any]:
         """Initializes the main data structure for aggregation."""
         return {
@@ -293,8 +494,6 @@ class PortfolioAnalyzer:
                     # Could add more details per wallet if desired
 
         full_message = "\n".join(message)
-        if len(full_message) > 4096:
-             return full_message[:4090] + "\n\\(\\.\\.\\.\\)"
         return full_message
 
     async def analyze_and_format_holdings(self, portfolio_name: str, fetched_data_packages: List[Dict[str, Any]]) -> str:

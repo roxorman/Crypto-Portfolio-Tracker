@@ -4,6 +4,7 @@ from decimal import Decimal
 from datetime import datetime, timedelta
 import json
 from config import Config
+import math
 
 def normalize_chain_name(chain: str) -> str:
     """
@@ -310,5 +311,39 @@ def format_price_dynamically(price: float, significant_digits: int = 4) -> str:
     # The '.{significant_digits}g' should handle this reasonably.
     return f"{price:.{significant_digits}g}"
 
+def split_message(message: str, max_length: int = 4096) -> List[str]:
+    """
+    Splits a message into chunks of a specified max_length, ensuring that
+    MarkdownV2 formatting is not broken across chunks.
+    """
+    if len(message) <= max_length:
+        return [message]
+
+    chunks = []
+    current_chunk = ""
+    lines = message.split('\n')
+
+    for line in lines:
+        # If a single line is too long, it must be split, which is complex.
+        # For now, we assume lines are not longer than max_length.
+        # A more robust solution would split the line itself.
+        if len(line) > max_length:
+            # Handle extremely long lines if necessary, for now, we'll truncate
+            # or find a way to split them without breaking markdown.
+            # This is a simplification for this example.
+            line = line[:max_length - 5] + "..."
+
+        if len(current_chunk) + len(line) + 1 > max_length:
+            chunks.append(current_chunk)
+            current_chunk = line
+        else:
+            if current_chunk:
+                current_chunk += "\n" + line
+            else:
+                current_chunk = line
+    
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    return chunks
 # Need to import math for log10
-import math

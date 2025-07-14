@@ -1,14 +1,14 @@
-from sqlalchemy import create_engine, delete, update
+from sqlalchemy import create_engine, delete, update, func
 from sqlalchemy.orm import sessionmaker, joinedload
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.future import select
 # Import 'is_' for NULL checks if needed, though SQLAlchemy handles None comparison well
 # from sqlalchemy import and_, or_, is_
-from models import Base, User, Portfolio, Wallet, Alert, TrackedWallet, PortfolioWalletAssociation
+from models import Base, User, Wallet, Alert, TrackedWallet
 from typing import List, Optional, Dict, Any
 import json
 import logging # Added logging
-from datetime import datetime, timezone # Added for timestamping
+from datetime import datetime, timezone, timedelta # Added for timestamping
 from web3 import Web3 # For address validation
 import re # For regex matching
 
@@ -33,15 +33,21 @@ class DatabaseManager:
         if self.engine: # Check if engine exists
             await self.engine.dispose()
 
-    async def create_user(self, user_id: int, username: Optional[str] = None, first_name: Optional[str] = None) -> User:
-        """Create a new user or get existing one, updating details if changed."""
+    async def create_user(self, user_id: int, username: Optional[str] = None, first_name: Optional[str] = None) -> tuple[User, bool]:
+        """Create a new user or get existing one, updating details if changed.
+
+        Returns:
+            A tuple containing the User object and a boolean indicating if the user was newly created.
+        """
         async with self.async_session() as session:
             result = await session.execute(
                 select(User).where(User.user_id == user_id)
             )
             user = result.scalar_one_or_none()
+            is_new_user = False
 
             if not user:
+                is_new_user = True
                 user = User(
                     user_id=user_id,
                     username=username,
@@ -67,103 +73,7 @@ class DatabaseManager:
                      logger.debug(f"User {user_id} already exists with up-to-date info.")
 
 
-            return user
-
-    async def create_portfolio(self, user_id: int, name: str, description: str = "") -> Optional[Portfolio]:
-        """Create a new portfolio."""
-        async with self.async_session() as session:
-            existing_portfolio = await self.get_portfolio_by_name(user_id, name)
-            if existing_portfolio:
-                logger.warning(f"Portfolio '{name}' already exists for user {user_id}.")
-                return None
-
-            portfolio = Portfolio(
-                user_id=user_id,
-                name=name,
-                description=description,
-            )
-            session.add(portfolio)
-            await session.commit()
-            await session.refresh(portfolio)
-            logger.info(f"Created portfolio '{name}' for user {user_id}.")
-            return portfolio
-
-    async def get_user_portfolios(self, user_id: int) -> List[Portfolio]:
-        """Get all portfolios for a user, including wallet associations."""
-        async with self.async_session() as session:
-            result = await session.execute(
-                select(Portfolio)
-                .where(Portfolio.user_id == user_id)
-                # Eager load associations AND the wallet within each association
-                .options(
-                    joinedload(Portfolio.wallet_associations)
-                    .joinedload(PortfolioWalletAssociation.wallet)
-                    )
-                .order_by(Portfolio.name) # Order portfolios by name
-            )
-            # Use unique() to handle potential duplicates if eager loading creates multiple rows per portfolio
-            return result.scalars().unique().all()
-
-    async def get_portfolio_by_name(self, user_id: int, name: str) -> Optional[Portfolio]:
-        """Get a portfolio by name for a user."""
-        async with self.async_session() as session:
-            result = await session.execute(
-                select(Portfolio)
-                .where(Portfolio.user_id == user_id, Portfolio.name == name)
-            )
-            return result.scalar_one_or_none()
-
-    async def get_portfolio_by_id(self, portfolio_id: int) -> Optional[Portfolio]:
-        """Get a portfolio by ID."""
-        async with self.async_session() as session:
-            return await session.get(Portfolio, portfolio_id)
-
-    async def delete_portfolio(self, user_id: int, name: str) -> bool:
-        """Delete a portfolio by name for a user."""
-        async with self.async_session() as session:
-            portfolio = await self.get_portfolio_by_name(user_id, name)
-            if not portfolio:
-                logger.warning(f"Portfolio '{name}' not found for user {user_id} during delete.")
-                return False
-
-            # Cascade should handle deleting PortfolioWalletAssociation entries.
-            # Alerts linked via portfolio_id should also be handled by cascade.
-            await session.delete(portfolio)
-            await session.commit()
-            logger.info(f"Deleted portfolio '{name}' (ID: {portfolio.portfolio_id}) for user {user_id}.")
-            return True
-
-    async def rename_portfolio(self, user_id: int, old_name: str, new_name: str) -> bool:
-        """Rename a portfolio."""
-        async with self.async_session() as session:
-            existing_new = await self.get_portfolio_by_name(user_id, new_name)
-            if existing_new:
-                logger.warning(f"Cannot rename portfolio '{old_name}' to '{new_name}' for user {user_id}: new name already exists.")
-                return False
-
-            portfolio = await self.get_portfolio_by_name(user_id, old_name)
-            if not portfolio:
-                logger.warning(f"Portfolio '{old_name}' not found for user {user_id} during rename.")
-                return False
-
-            portfolio.name = new_name
-            session.add(portfolio) # Explicitly add the modified object to the session
-            try:
-                await session.flush() # Try to flush changes to DB first
-                logger.info(f"Successfully flushed rename of portfolio '{old_name}' to '{new_name}' for user {user_id}.")
-                await session.commit()
-                logger.info(f"Successfully committed rename of portfolio '{old_name}' to '{new_name}' for user {user_id}.")
-                # Verify the change within the same session if possible, or re-fetch to be certain
-                # For now, let's assume commit success means DB success.
-                return True
-            except Exception as e:
-                logger.error(f"Error during commit for portfolio rename ({old_name} -> {new_name}) for user {user_id}: {e}")
-                try:
-                    await session.rollback()
-                    logger.info(f"Session rolled back for portfolio rename failure: {old_name} -> {new_name}")
-                except Exception as rb_e:
-                    logger.error(f"Error during rollback for portfolio rename failure: {rb_e}")
-                return False
+            return user, is_new_user
 
     # --- Wallet Identity Management ---
 
@@ -186,7 +96,6 @@ class DatabaseManager:
                 wallet = Wallet(
                     user_id=user_id,
                     address=norm_address, # Store normalized address
-                    # wallet_type field is removed from Wallet model
                     label=label
                 )
                 session.add(wallet)
@@ -284,7 +193,7 @@ class DatabaseManager:
     async def delete_wallet_identity(self, user_id: int, wallet_id: int) -> bool:
         """
         Deletes a specific Wallet identity by its ID for a given user.
-        Relies on cascade deletes for related PortfolioWalletAssociation, Alerts, etc.
+        Relies on cascade deletes for related Alerts, etc.
         """
         async with self.async_session() as session:
             # Fetch the wallet first to ensure it belongs to the user and exists
@@ -299,9 +208,7 @@ class DatabaseManager:
 
             try:
                 # Cascade should handle:
-                # - PortfolioWalletAssociation entries linking this wallet
                 # - Alerts linked via wallet_id
-                # - PortfolioSnapshots linked via wallet_id
                 await session.delete(wallet)
                 await session.commit()
                 logger.info(f"Successfully deleted wallet identity ID {wallet_id} (Address: {wallet.address}) for user {user_id}.")
@@ -311,30 +218,6 @@ class DatabaseManager:
                  await session.rollback()
                  return False
 
-
-    # --- Portfolio <-> Wallet Association Management ---
-
-    async def get_portfolio_wallet_associations(self, portfolio_id: int) -> List[PortfolioWalletAssociation]:
-        """Get all wallet associations for a portfolio, eagerly loading the Wallet object."""
-        async with self.async_session() as session:
-            result = await session.execute(
-                select(PortfolioWalletAssociation)
-                .where(PortfolioWalletAssociation.portfolio_id == portfolio_id)
-                .options(joinedload(PortfolioWalletAssociation.wallet)) # Eagerly load Wallet
-                .order_by(PortfolioWalletAssociation.added_at) # Order by added time
-            )
-            return result.scalars().all()
-
-    async def check_portfolio_wallet_link(self, portfolio_id: int, wallet_id: int) -> bool:
-         """Checks if a specific portfolio-wallet link exists."""
-         async with self.async_session() as session:
-             stmt = select(PortfolioWalletAssociation.association_id).where(
-                 PortfolioWalletAssociation.portfolio_id == portfolio_id,
-                 PortfolioWalletAssociation.wallet_id == wallet_id
-             )
-             existing_association = await session.execute(stmt)
-             return existing_association.scalar_one_or_none() is not None
-         
     async def check_label_exists(self, user_id: int, label: str, exclude_wallet_id: Optional[int] = None) -> bool:
         """Checks if a label is already used by another wallet for the same user."""
         async with self.async_session() as session:
@@ -350,60 +233,6 @@ class DatabaseManager:
             # If scalar_one_or_none finds *any* matching ID, the label exists elsewhere
             return result.scalar_one_or_none() is not None
 
-    async def add_wallet_to_portfolio(self, portfolio_id: int, wallet_id: int) -> bool:
-        """Add a wallet identity to a portfolio."""
-        async with self.async_session() as session:
-            # Check if the association already exists
-            link_exists = await self.check_portfolio_wallet_link(portfolio_id, wallet_id)
-            if link_exists:
-                 logger.warning(f"Association already exists for PortfolioID:{portfolio_id}, WalletID:{wallet_id}")
-                 return False # Indicate link already exists
-
-            try:
-                association = PortfolioWalletAssociation(
-                    portfolio_id=portfolio_id,
-                    wallet_id=wallet_id
-                    # chain attribute removed
-                )
-                session.add(association)
-                await session.commit()
-                logger.info(f"Associated WalletID:{wallet_id} with PortfolioID:{portfolio_id}")
-                return True
-            except Exception as e:
-                logger.error(f"Error associating WalletID:{wallet_id} with PortfolioID:{portfolio_id}: {e}")
-                await session.rollback()
-                return False # Indicate failure
-
-    async def remove_wallet_from_portfolio(self, portfolio_id: int, wallet_id: int) -> bool:
-        """Remove a wallet association from a portfolio."""
-        async with self.async_session() as session:
-            try:
-                stmt = delete(PortfolioWalletAssociation).where(
-                    PortfolioWalletAssociation.portfolio_id == portfolio_id,
-                    PortfolioWalletAssociation.wallet_id == wallet_id
-                )
-                # chain attribute removed from where clause
-                result = await session.execute(stmt)
-                await session.commit()
-                if result.rowcount > 0:
-                    logger.info(f"Removed association for WalletID:{wallet_id} from PortfolioID:{portfolio_id}")
-                    return True
-                else:
-                     logger.warning(f"No association found to remove for WalletID:{wallet_id}, PortfolioID:{portfolio_id}")
-                     return False # Indicate nothing was removed
-            except Exception as e:
-                logger.error(f"Error removing association for WalletID:{wallet_id} from PortfolioID:{portfolio_id}: {e}")
-                await session.rollback()
-                return False # Indicate failure
-
-
-    # --- Alert and Tracking Methods (Remain largely unchanged for now) ---
-    # ... (create_alert, get_user_alerts, get_alert_by_id, deactivate_alert, etc.) ...
-    # ... (get_all_users, get_active_alerts, get_wallet_by_id) ...
-    # ... (add_tracked_wallet, get_user_tracked_wallets, find_user_tracked_wallet, etc.) ...
-    # --- Snapshot Methods (Placeholders) ---
-    # ... (save_portfolio_snapshot, get_latest_snapshot) ...
-
     # --- Keep methods needed by other modules ---
     async def get_wallet_by_id(self, wallet_id: int) -> Optional[Wallet]:
         """Get a wallet identity by ID."""
@@ -416,6 +245,19 @@ class DatabaseManager:
             result = await session.execute(select(User))
             return result.scalars().all()
 
+    async def get_all_users_by_activity(self) -> List[User]:
+        """Get all users from the database, sorted by last activity (most recent first)."""
+        async with self.async_session() as session:
+            # We define "last active" as the more recent of `last_api_call_at` and `updated_at`.
+            # `last_api_call_at` can be NULL. `updated_at` is not.
+            # `func.greatest` in PostgreSQL handles NULLs by ignoring them if other arguments are not null.
+            # So `greatest(non_null, null)` returns `non_null`. This is what we want.
+            stmt = select(User).order_by(
+                func.greatest(User.updated_at, User.last_api_call_at).desc().nulls_last()
+            )
+            result = await session.execute(stmt)
+            return result.scalars().all()
+
     async def get_active_alerts(self) -> List[Alert]:
         """Get all active alerts."""
         async with self.async_session() as session:
@@ -423,7 +265,6 @@ class DatabaseManager:
                 select(Alert).where(Alert.is_active == True)
                 .options( # Eager load related objects needed for alert checking
                      joinedload(Alert.user),
-                     joinedload(Alert.portfolio),
                      joinedload(Alert.wallet),
                      joinedload(Alert.tracked_wallet)
                      )
@@ -433,12 +274,23 @@ class DatabaseManager:
     # --- New Token Price Alert Methods ---
 
     async def get_active_token_price_alerts(self) -> List[Alert]:
-        """Selects all active 'token_price' alerts."""
+        """Selects all active 'token_price' alerts from CMC."""
         async with self.async_session() as session:
             stmt = (
                 select(Alert)
-                .where(Alert.alert_type == 'token_price', Alert.is_active == True)
+                .where(Alert.alert_type == 'token_price', Alert.is_active == True, Alert.source == 'cmc')
                 .options(joinedload(Alert.user)) # Eager load user for notifications
+            )
+            result = await session.execute(stmt)
+            return result.scalars().all()
+
+    async def get_active_coingecko_token_price_alerts(self) -> List[Alert]:
+        """Selects all active 'token_price' alerts from CoinGecko."""
+        async with self.async_session() as session:
+            stmt = (
+                select(Alert)
+                .where(Alert.alert_type == 'token_price', Alert.is_active == True, Alert.source == 'coingecko')
+                .options(joinedload(Alert.user))
             )
             result = await session.execute(stmt)
             return result.scalars().all()
@@ -476,7 +328,7 @@ class DatabaseManager:
     async def create_token_price_alert(
         self, 
         user_id: int, 
-        cmc_id: int,  # Changed from token_mobula_id to cmc_id
+        cmc_id: int,
         token_display_name: str, 
         target_price: float, 
         condition: str, # "above" or "below"
@@ -491,17 +343,17 @@ class DatabaseManager:
 
             alert_conditions = {
                 "target_price": target_price,
-                "condition": condition.lower()
+                "condition": condition.lower(),
+                "label": label or f"{token_display_name} {condition} ${target_price:g}"
             }
-            if label:
-                alert_conditions["label"] = label
 
             new_alert = Alert(
                 user_id=user_id,
                 alert_type='token_price',
+                source='cmc', # Explicitly set source
                 conditions=alert_conditions,
-                cmc_id=cmc_id,  # Use cmc_id
-                token_display_name=token_display_name, # This is now non-nullable
+                cmc_id=cmc_id,
+                token_display_name=token_display_name,
                 is_active=True,
                 trigger_count=0
             )
@@ -509,10 +361,56 @@ class DatabaseManager:
             try:
                 await session.commit()
                 await session.refresh(new_alert)
-                logger.info(f"Created token price alert for user {user_id}, CMC ID {cmc_id}, label '{label}'. Alert ID: {new_alert.alert_id}")
+                logger.info(f"Created CMC token price alert for user {user_id}, CMC ID {cmc_id}, label '{label}'. Alert ID: {new_alert.alert_id}")
                 return new_alert
             except Exception as e:
-                logger.error(f"Error creating token price alert for user {user_id}, CMC ID {cmc_id}: {e}")
+                logger.error(f"Error creating CMC token price alert for user {user_id}, CMC ID {cmc_id}: {e}")
+                await session.rollback()
+                return None
+
+    async def create_coingecko_token_price_alert(
+        self,
+        user_id: int,
+        token_address: str,
+        network_id: str,
+        token_display_name: str,
+        target_price: float,
+        condition: str,
+        label: Optional[str] = None,
+        polling_interval: int = 210 # Default 3.5 minutes
+    ) -> Optional[Alert]:
+        """Creates a new 'token_price' alert using CoinGecko data."""
+        async with self.async_session() as session:
+            if condition.lower() not in ['above', 'below']:
+                logger.error(f"Invalid condition '{condition}' for CoinGecko alert for user {user_id}.")
+                return None
+
+            alert_conditions = {
+                "target_price": target_price,
+                "condition": condition.lower(),
+                "label": label or f"{token_display_name} {condition} ${target_price:g}"
+            }
+
+            new_alert = Alert(
+                user_id=user_id,
+                alert_type='token_price',
+                source='coingecko',
+                conditions=alert_conditions,
+                token_address=token_address,
+                network_id=network_id,
+                token_display_name=token_display_name,
+                is_active=True,
+                trigger_count=0,
+                polling_interval_seconds=polling_interval
+            )
+            session.add(new_alert)
+            try:
+                await session.commit()
+                await session.refresh(new_alert)
+                logger.info(f"Created CoinGecko alert for user {user_id}, Address {token_address} on {network_id}. Alert ID: {new_alert.alert_id}")
+                return new_alert
+            except Exception as e:
+                logger.error(f"Error creating CoinGecko alert for user {user_id}, Address {token_address}: {e}")
                 await session.rollback()
                 return None
 
@@ -576,6 +474,70 @@ class DatabaseManager:
                 await session.rollback()
                 return False
 
-    # --- Add other necessary Alert/TrackedWallet methods back if they were removed ---
+    async def reactivate_alert(self, alert_id: int, new_condition: str, new_target_price: float) -> bool:
+        """Reactivates a specific alert with a new price condition."""
+        async with self.async_session() as session:
+            alert = await session.get(Alert, alert_id)
+            if not alert:
+                logger.warning(f"Alert ID {alert_id} not found for reactivation.")
+                return False
 
-# --- END OF MODIFIED FILE db_manager.py ---
+            if alert.alert_type != 'token_price':
+                logger.warning(f"Attempted to reactivate non-token-price alert ID {alert_id}.")
+                return False
+
+            # Update conditions with new price and condition
+            new_conditions = alert.conditions.copy()
+            new_conditions['target_price'] = new_target_price
+            new_conditions['condition'] = new_condition.lower()
+
+            alert.conditions = new_conditions
+            alert.is_active = True
+            alert.last_triggered_at = None # Reset trigger info
+            alert.last_triggered_price = None
+
+            try:
+                await session.commit()
+                logger.info(f"Successfully reactivated alert ID {alert_id} with new condition: {new_condition} {new_target_price}.")
+                return True
+            except Exception as e:
+                logger.error(f"Error reactivating alert ID {alert_id}: {e}")
+                await session.rollback()
+                return False
+            
+    async def set_user_premium_status(self, user_id: int, is_premium: bool, days: Optional[int] = None) -> Optional[User]:
+        """Sets the premium status for a given user ID."""
+        async with self.async_session() as session:
+            user = await session.get(User, user_id)
+            if not user:
+                logger.warning(f"Could not set premium status. User not found: {user_id}")
+                return None
+            
+            user.is_premium = is_premium
+            if is_premium:
+                user.premium_start_date = datetime.now(timezone.utc)
+                if days:
+                    user.premium_expiry_date = datetime.now(timezone.utc) + timedelta(days=days)
+                else:
+                    user.premium_expiry_date = None # Or a far future date for permanent premium
+            else:
+                user.premium_start_date = None
+                user.premium_expiry_date = None
+
+            await session.commit()
+            await session.refresh(user)
+            logger.info(f"Set premium status for user {user_id} to {is_premium}.")
+            return user
+
+    async def get_expired_premium_users(self) -> List[User]:
+        """Get all users whose premium has expired."""
+        async with self.async_session() as session:
+            now = datetime.now(timezone.utc)
+            result = await session.execute(
+                select(User).where(
+                    User.is_premium == True,
+                    User.premium_expiry_date != None,
+                    User.premium_expiry_date < now
+                )
+            )
+            return result.scalars().all()
