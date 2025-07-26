@@ -144,7 +144,7 @@ class PriceAlertHandlers:
         user_id = update.effective_user.id
 
         # --- NEW LIMIT CHECK ---
-        user = await self.db.create_user(user_id)
+        user, _ = await self.db.create_user(user_id)
         tier_config = self.config.get_user_tier_config(user.is_premium)
         current_alerts = await self.db.get_user_token_price_alerts(user_id, only_active=True)
 

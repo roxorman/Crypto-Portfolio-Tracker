@@ -1,7 +1,7 @@
 import asyncio
 import aiohttp
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from db_manager import DatabaseManager
@@ -9,11 +9,15 @@ from config import Config
 from models import User, Wallet
 from telegram.helpers import escape_markdown
 from view_handlers import format_transaction_summary
+from decorators import api_rate_limit # Import the decorator
 
 # Callback data prefixes
 CALLBACK_ANALYZE_WALLET_PREFIX = "analyze_wallet_"
 CALLBACK_ANALYZE_SENT_PREFIX = "analyze_send_"
 CALLBACK_ANALYZE_RECEIVED_PREFIX = "analyze_receive_"
+# --- NEW: Callback prefix for the final execution step ---
+CALLBACK_ANALYZE_EXECUTE_PREFIX = "analyze_exec_"
+
 
 from api_fetcher import PortfolioFetcher
 
@@ -27,6 +31,7 @@ class TransactionAnalyzerHandlers:
     def analyze_transactions(self, transactions, operation_type):
         """
         Analyzes a list of transactions and returns a summary.
+        (This function's internal logic remains unchanged)
         """
         if not transactions:
             return "No transactions to analyze."
@@ -140,9 +145,6 @@ class TransactionAnalyzerHandlers:
         user_id = query.from_user.id
 
         user, _ = await self.db.create_user(user_id)
-        if not user.is_premium:
-            await query.edit_message_text("This feature is for premium users only.")
-            return
 
         wallets = await self.db.get_user_wallets(user_id)
         if not wallets:
@@ -168,29 +170,91 @@ class TransactionAnalyzerHandlers:
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text("Please select the transaction type to analyze:", reply_markup=reply_markup)
 
+    async def select_timeframe_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """NEW: Shows the timeframe selection menu."""
+        query = update.callback_query
+        await query.answer()
+
+        try:
+            parts = query.data.split('_')
+            operation_type = parts[1]  # 'send' or 'receive'
+            wallet_id = int(parts[2])
+        except (IndexError, ValueError):
+            await query.edit_message_text("Error: Invalid selection. Please try again.")
+            return
+
+        timeframes = {
+            "1D": "1d", "1W": "7d", "1M": "30d", "1Y": "365d", "Max": "max"
+        }
+        
+        keyboard = []
+        row = []
+        for name, key in timeframes.items():
+            # Format: analyze_exec_walletID_opType_timeframe
+            callback_data = f"{CALLBACK_ANALYZE_EXECUTE_PREFIX}{wallet_id}_{operation_type}_{key}"
+            row.append(InlineKeyboardButton(name, callback_data=callback_data))
+        keyboard.append(row)
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("Please select the timeframe for the analysis:", reply_markup=reply_markup)
+
+    @api_rate_limit # Apply the rate limit decorator here
     async def analyze_wallet_transactions(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Final step: Fetches, filters by time, analyzes, and displays transactions.
+        """
         query = update.callback_query
         await query.answer()
         
-        parts = query.data.split('_')
-        operation_type = parts[1]
-        wallet_id = int(parts[2])
+        try:
+            # Expected: analyze_exec_123_send_7d
+            parts = query.data.split('_')
+            wallet_id = int(parts[2])
+            operation_type = parts[3]
+            timeframe_key = parts[4]
+        except (IndexError, ValueError):
+            await query.edit_message_text("Error: Invalid analysis request. Please start over.")
+            return
         
         wallet = await self.db.get_wallet_by_id(wallet_id)
-
         if not wallet:
             await query.edit_message_text("Wallet not found.")
             return
 
         await query.edit_message_text(f"Fetching {operation_type} transactions for {wallet.label or wallet.address}... This may take a moment.")
+        
+        # 1. Fetch all transactions
+        all_transactions = await self.portfolio_fetcher.get_wallet_transactions(wallet.address, operation_type)
 
-        transactions = await self.portfolio_fetcher.get_wallet_transactions(wallet.address, operation_type)
+        if not all_transactions:
+            await query.edit_message_text(f"Could not retrieve any {operation_type} transactions for {wallet.label or wallet.address}.")
+            return
+            
+        # 2. Filter transactions by timeframe
+        filtered_transactions = []
+        if timeframe_key == "max":
+            filtered_transactions = all_transactions
+        else:
+            try:
+                days = int(timeframe_key[:-1])
+                now = datetime.now(timezone.utc)
+                start_date = now - timedelta(days=days)
+                
+                for tx in all_transactions:
+                    mined_at_str = tx.get('attributes', {}).get('mined_at')
+                    if mined_at_str:
+                        tx_date = datetime.fromisoformat(mined_at_str.replace('Z', '+00:00'))
+                        if tx_date >= start_date:
+                            filtered_transactions.append(tx)
+            except (ValueError, TypeError) as e:
+                await query.edit_message_text(f"Error processing timeframe: {e}. Please try again.")
+                return
 
-        if transactions:
-            summary = self.analyze_transactions(transactions, operation_type)
+        # 3. Analyze and format the filtered list
+        if filtered_transactions:
+            summary = self.analyze_transactions(filtered_transactions, operation_type)
             message = format_transaction_summary(summary, operation_type, wallet.label or wallet.address)
             
-            # Split message if too long
             from utils import split_message
             message_chunks = split_message(message)
             
@@ -200,4 +264,4 @@ class TransactionAnalyzerHandlers:
                 else:
                     await context.bot.send_message(chat_id=query.message.chat_id, text=chunk, parse_mode='MarkdownV2')
         else:
-            await query.edit_message_text(f"Could not retrieve or analyze {operation_type} transactions for {wallet.label or wallet.address}.")
+            await query.edit_message_text(f"No {operation_type} transactions found for {wallet.label or wallet.address} in the selected timeframe.")

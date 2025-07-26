@@ -42,7 +42,7 @@ from wallet_management_handlers import WalletManagementHandlers, CALLBACK_REMOVE
 from view_handlers import ViewHandlers, CALLBACK_SELECT_VIEW_TYPE_PREFIX
 from alert_handlers import PriceAlertHandlers, CALLBACK_DELETE_ALERT_PREFIX, CALLBACK_BACK_TO_ALERTS_MENU
 from wallet_chart_handlers import WalletChartHandlers, CALLBACK_WALLET_CHART_MENU_BACK_MAIN, CALLBACK_WALLET_CHART_SELECT_PREFIX, CALLBACK_WALLET_CHART_PERIOD_PREFIX
-from transaction_analyzer_handlers import TransactionAnalyzerHandlers, CALLBACK_ANALYZE_WALLET_PREFIX, CALLBACK_ANALYZE_SENT_PREFIX, CALLBACK_ANALYZE_RECEIVED_PREFIX
+from transaction_analyzer_handlers import TransactionAnalyzerHandlers, CALLBACK_ANALYZE_WALLET_PREFIX, CALLBACK_ANALYZE_SENT_PREFIX, CALLBACK_ANALYZE_RECEIVED_PREFIX, CALLBACK_ANALYZE_EXECUTE_PREFIX
 # --- END NEW HANDLER IMPORTS ---
 
 import asyncio
@@ -102,11 +102,18 @@ def register_handlers(application, core_h, wallet_h, view_h, price_alert_h, wall
     application.add_handler(CallbackQueryHandler(core_h.show_crypto_payment_info, pattern=f"^{CALLBACK_PAY_CRYPTO_PREFIX}"))
     application.add_handler(CallbackQueryHandler(core_h.show_premium_plans, pattern=f"^{CALLBACK_BACK_TO_PREMIUM_PLANS}$"))
     application.add_handler(CallbackQueryHandler(core_h.show_payment_options, pattern=f"^{CALLBACK_BACK_TO_PAYMENT_OPTIONS_PREFIX}"))
+    
+    # --- END PREMIUM FLOW HANDLERS ---
     application.add_handler(CallbackQueryHandler(transaction_analyzer_h.transaction_analyzer_menu, pattern=f"^{CALLBACK_MAIN_MENU_WALLET_TRANSACTION_ANALYZER}$"))
     application.add_handler(CallbackQueryHandler(transaction_analyzer_h.select_transaction_type_menu, pattern=f"^{CALLBACK_ANALYZE_WALLET_PREFIX}"))
-    application.add_handler(CallbackQueryHandler(transaction_analyzer_h.analyze_wallet_transactions, pattern=f"^{CALLBACK_ANALYZE_SENT_PREFIX}"))
-    application.add_handler(CallbackQueryHandler(transaction_analyzer_h.analyze_wallet_transactions, pattern=f"^{CALLBACK_ANALYZE_RECEIVED_PREFIX}"))
-    # --- END PREMIUM FLOW HANDLERS ---
+    
+    # These two now point to the timeframe selection menu
+    application.add_handler(CallbackQueryHandler(transaction_analyzer_h.select_timeframe_menu, pattern=f"^{CALLBACK_ANALYZE_SENT_PREFIX}"))
+    application.add_handler(CallbackQueryHandler(transaction_analyzer_h.select_timeframe_menu, pattern=f"^{CALLBACK_ANALYZE_RECEIVED_PREFIX}"))
+    # This new handler executes the final analysis
+    application.add_handler(CallbackQueryHandler(transaction_analyzer_h.analyze_wallet_transactions, pattern=f"^{CALLBACK_ANALYZE_EXECUTE_PREFIX}"))
+
+    # --- Core Handlers ---
     application.add_handler(CallbackQueryHandler(core_h.main_menu_placeholder_callback, pattern=f"^{CALLBACK_MAIN_MENU_SETTINGS}$"))
     application.add_handler(CallbackQueryHandler(core_h.main_menu_help_callback, pattern=f"^{CALLBACK_MAIN_MENU_HELP}$"))
     
