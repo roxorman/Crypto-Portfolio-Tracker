@@ -2,103 +2,89 @@
 
 A Telegram bot for tracking crypto portfolios across multiple chains, providing analytics, visualizations, and alerts.
 
-## Features
+## Core Features
 
-- Multi-chain wallet tracking (Ethereum, Arbitrum, Base)
-- Real-time portfolio value updates
-- Token balance tracking and analytics
-- Price alerts and portfolio value alerts
-- Portfolio visualization (charts and graphs)
-- Historical portfolio tracking
-- Free and Premium tiers
+- **Multi-Chain Portfolio Tracking**: View detailed holdings for any EVM-compatible wallet, powered by the Zerion API.
+- **Detailed Portfolio Analysis**: Choose between a high-level summary view (total value, 24h change, distribution by chain) and a detailed view of your top 100 token positions.
+- **Profit & Loss (PnL) Insights**: Analyze your wallet's performance with realized/unrealized gains and fee data.
+- **Historical Value Charting**: Generate historical value charts for your wallets over various time periods (Day, Week, Month, Year, Max).
+- **Custom Price Alerts**: Set up alerts for when a token's price goes above or below a target, using data from CoinMarketCap and CoinGecko.
+- **Free and Premium Tiers**: Access basic features for free or upgrade to premium for higher limits on wallets and alerts.
 
 ## Project Structure
 
+The project is organized with all main application logic located within the `scripts/` directory.
+
 ```
-├── main.py               # Bot entry point and command handlers
-├── config.py            # Configuration and environment variables
-├── db_manager.py        # Database operations
-├── models.py            # SQLAlchemy database models
-├── wallet_manager.py    # Wallet operations and balance fetching
-├── portfolio_fetcher.py # Portfolio data and analytics
-├── alerts_manager.py    # Alert system management
-├── notifier.py         # Telegram messaging functions
-├── scheduler.py        # Scheduled tasks handler
-└── utils.py           # Helper functions and utilities
+.
+├── Dockerfile              # Instructions for building the application container for deployment.
+├── railway.json            # Railway-specific deployment configuration.
+├── requirements.txt        # A list of all Python dependencies for the project.
+├── alembic.ini             # Configuration for Alembic database migrations.
+├── migrations/             # Contains database migration scripts managed by Alembic.
+├── resources/              # Static resources like the help text.
+└── scripts/                # Main source code for the bot.
+    ├── main.py             # Bot entry point, initializes and runs the application.
+    ├── config.py           # Handles environment variables and configuration.
+    ├── db_manager.py       # Manages all database interactions using SQLAlchemy.
+    ├── models.py           # Defines the database schema with SQLAlchemy models.
+    ├── api_fetcher.py      # Fetches data from external APIs (Zerion, CMC, etc.).
+    ├── *_handlers.py       # Modules for handling different bot features (wallets, alerts, views).
+    └── ...                 # Other utility and manager scripts.
 ```
 
-## Setup
+## Local Setup
 
-1. Create a virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # Linux/Mac
-   # or
-   .\venv\Scripts\activate  # Windows
-   ```
+1.  **Create a virtual environment**:
+    ```bash
+    python -m venv venv_pftracker
+    source venv_pftracker/bin/activate  # Linux/Mac
+    # or
+    .\venv_pftracker\Scripts\activate  # Windows
+    ```
 
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+2.  **Install dependencies**:
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-3. Configure environment variables:
-   - Copy `.env.template` to `.env`
-   - Fill in your configuration values:
-     - Telegram Bot Token
-     - Alchemy API Key
-     - Database URL
+3.  **Configure environment variables**:
+    -   Create a file named `.env`.
+    -   Fill in your secret keys and tokens (`TELEGRAM_TOKEN`, `DATABASE_URL`, API keys).
 
-4. Initialize the database:
-   ```bash
-   # Database initialization will be handled automatically on first run
-   ```
+4.  **Run database migrations**:
+    ```bash
+    alembic upgrade head
+    ```
 
-5. Run the bot:
-   ```bash
-   python main.py
-   ```
+5.  **Run the bot**:
+    ```bash
+    python scripts/main.py
+    ```
 
-## Available Commands
+## Usage
 
-- `/start` - Start using the bot
-- `/addwallet` - Add a new wallet to track
-- `/removewallet` - Remove a tracked wallet
-- `/summary` - Get portfolio summary
-- `/setalert` - Set a new alert
-- `/removealert` - Remove an existing alert
+The bot is primarily operated through an interactive, button-based menu.
 
-## Deployment
+-   **`/start`**: Initializes the bot and displays the main menu.
+-   From the menu, you can navigate to manage wallets, view holdings, set price alerts, and more.
 
-The bot is designed to be deployed on Railway:
-1. Connect your GitHub repository to Railway
-2. Configure environment variables in Railway dashboard
-3. Deploy the application
+## Deployment on Railway
 
-## Database Schema
+This project is pre-configured for easy deployment on Railway.
 
-The application uses PostgreSQL with the following main tables:
-- `users` - User information and preferences
-- `wallets` - Tracked wallet addresses
-- `alerts` - User-configured alerts
-- `portfolio_snapshots` - Historical portfolio data
+1.  Push the entire project repository to GitHub.
+2.  Create a new project on Railway and link it to your GitHub repository.
+3.  Add a PostgreSQL database service in your Railway project.
+4.  Configure your environment variables (e.g., `TELEGRAM_TOKEN`, `DATABASE_URL`) in the Railway service settings.
+
+Railway will automatically use the `Dockerfile` to build the image and the `railway.json` file to run database migrations (`alembic upgrade head`) before starting the bot.
 
 ## Dependencies
 
-- python-telegram-bot - Telegram bot framework
-- web3 - Ethereum interaction
-- SQLAlchemy - Database ORM
-- matplotlib - Chart generation
-- pandas - Data analysis
-- psycopg2/asyncpg - PostgreSQL adapters
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## License
-
-MIT License
+-   **python-telegram-bot**: The core framework for the Telegram bot.
+-   **SQLAlchemy**: ORM for database interaction.
+-   **Alembic**: Handles database migrations.
+-   **aiohttp**: For asynchronous API requests.
+-   **psycopg2-binary / asyncpg**: PostgreSQL database adapters.
+-   **matplotlib**: Used for generating wallet charts.

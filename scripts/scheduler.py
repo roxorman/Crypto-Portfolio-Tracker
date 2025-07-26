@@ -15,6 +15,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+"""
+This feature is not yet implemented, but it will be used to handle scheduled tasks
+like portfolio updates, alert checking, and daily snapshots.
+"""
+
 class Scheduler:
     """Handles scheduled tasks like portfolio updates and alert checking."""
 
