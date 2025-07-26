@@ -1,2 +1,2 @@
-release: alembic upgrade head
+release: python -m alembic upgrade head
 worker: python scripts/main.py
