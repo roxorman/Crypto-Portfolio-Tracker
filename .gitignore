@@ -47,3 +47,10 @@ venv_pftracker/
 
 # ignore plan.md
 plan.md
+
+# alembic ini
+alembic.ini
+# ignore migrations directory
+migrations/
+Procfile
+
